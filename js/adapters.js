@@ -22,10 +22,14 @@ SR._httpError = function (r, prefix) {
 /* 真模型输出格式约定：追加到角色 systemPrompt 后，要求同时给出日语台词与中文字幕 */
 SR._OUTPUT_RULE =
   '\n\n---\n' +
-  '【最優先・出力フォーマット】他の説明は一切書かず、必ず以下の3行だけを出力すること：\n' +
+  '【最優先・出力フォーマット／絶対厳守】他の説明は一切書かず、必ず以下の3行をこの順番で出力すること：\n' +
   'JA: <キャラクターとしての日本語のセリフ（1〜2文）>\n' +
-  'ZH: <上の日本語セリフの自然で口語的な中国語訳>\n' +
-  '[emotion:normal または smile / angry / sad / love]';
+  'ZH: <上のセリフを自然で口語的な簡体字中国語に訳した文。日本語ではなく必ず中国語。省略禁止>\n' +
+  '[emotion:normal または smile / angry / sad / love]\n' +
+  '例：\n' +
+  'JA: べ、別に心配じゃないからね！\n' +
+  'ZH: 才、才不是担心你呢！\n' +
+  '[emotion:angry]';
 
 /* 解析真模型的双语输出：拆出 JA / ZH / emotion，容错缺标签的情况 */
 SR._parseBilingual = function (raw) {
@@ -150,6 +154,38 @@ SR._chatStream = function (url, apiKey, body, hooks) {
   });
 };
 
+/* 判断文本是否为“真中文”（含汉字且不含假名）：用于检测模型是否漏给/错给中文字幕 */
+SR._isChinese = function (t) {
+  t = t || '';
+  return /[\u4e00-\u9fff]/.test(t) && !/[\u3040-\u30ff]/.test(t);
+};
+
+/* 模型漏给/错给中文字幕时的兜底：单独发一次轻量翻译请求，把日语台词译成简体中文 */
+SR._translateJaToZh = function (ja, baseUrl, apiKey, model) {
+  if (!ja) return Promise.resolve('');
+  var body = {
+    model: model,
+    messages: [
+      { role: 'system', content: 'あなたは翻訳者です。以下の日本語セリフを自然で口語的な簡体字中国語に訳し、訳文だけを1行で返してください。説明・タグ・接頭辞は不要。' },
+      { role: 'user', content: ja }
+    ],
+    temperature: 0.3,
+    max_tokens: 200
+  };
+  return fetch(baseUrl + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (apiKey || '') },
+    body: JSON.stringify(body)
+  }).then(function (r) {
+    if (!r.ok) return Promise.resolve('');
+    return r.json();
+  }).then(function (data) {
+    var c = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
+    c = String(c).replace(/\[emotion:[^\]]*\]?/gi, '').replace(/^\s*(ZH|中文|中国語)\s*[:：]\s*/i, '').trim();
+    return SR._isChinese(c) ? c : '';
+  }).catch(function () { return ''; });
+};
+
 SR.adapters.mock = {
   id: 'mock',
   name: 'Mock 离线语料库',
@@ -199,19 +235,21 @@ SR.adapters.stepfun = {
         { role: 'user', content: worry }
       ],
       temperature: 0.9,
-      max_tokens: 300,   // 台词很短，封顶避免冗长生成拖慢首字
+      max_tokens: 500,   // 放宽上限，避免截断把 ZH 行切掉
       stream: true       // 流式：边生成边上字幕，JA 行完成即并行触发 TTS
     };
     return SR._chatStream(SR.adapters.stepfun.baseUrl + '/chat/completions', settings.apiKey, body, hooks)
       .then(function (raw) {
         if (!raw || !raw.trim()) throw new Error('空响应');
         var r = SR._parseBilingual(raw);
-        return {
-          ja: r.ja,
-          zh: r.zh,
-          emotion: r.emotion || SR.emotionRouter.weighted(personality),
-          source: 'real'
+        var build = function (zh) {
+          return { ja: r.ja, zh: zh, emotion: r.emotion || SR.emotionRouter.weighted(personality), source: 'real' };
         };
+        if (SR._isChinese(r.zh)) return build(r.zh);
+        // 模型漏给/错给中文（中文字幕变日文）：补一次轻量翻译兜底
+        return SR._translateJaToZh(r.ja, SR.adapters.stepfun.baseUrl, settings.apiKey,
+          (settings && settings.chatModel) || SR.adapters.stepfun.chatModel)
+          .then(function (zh) { return build(zh || r.ja); });
       });
   }
 };
@@ -230,19 +268,20 @@ SR.adapters.aiping = {
         { role: 'user', content: worry }
       ],
       temperature: 0.9,
-      max_tokens: 300,
+      max_tokens: 500,
       stream: true
     };
     return SR._chatStream(SR.adapters.aiping.baseUrl + '/chat/completions', settings.apiKey, body, hooks)
       .then(function (raw) {
         if (!raw || !raw.trim()) throw new Error('空响应');
         var r = SR._parseBilingual(raw);
-        return {
-          ja: r.ja,
-          zh: r.zh,
-          emotion: r.emotion || SR.emotionRouter.weighted(personality),
-          source: 'real'
+        var build = function (zh) {
+          return { ja: r.ja, zh: zh, emotion: r.emotion || SR.emotionRouter.weighted(personality), source: 'real' };
         };
+        if (SR._isChinese(r.zh)) return build(r.zh);
+        return SR._translateJaToZh(r.ja, SR.adapters.aiping.baseUrl, settings.apiKey,
+          (settings && settings.chatModel) || SR.adapters.aiping.chatModel)
+          .then(function (zh) { return build(zh || r.ja); });
       });
   }
 };
