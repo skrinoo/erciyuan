@@ -19,18 +19,19 @@ SR._httpError = function (r, prefix) {
   });
 };
 
-/* 真模型输出格式约定：追加到角色 systemPrompt 后，要求同时给出日语台词与中文字幕 */
+/* 真模型输出格式约定：追加到角色 systemPrompt 后，要求同时给出日语台词与中文字幕。
+   emotion 放首行：JA 一流完就能带着情绪去合成语音（不必等整段回复），不牺牲首响速度 */
 SR._OUTPUT_RULE =
   '\n\n---\n' +
   '【最優先・出力フォーマット／絶対厳守】他の説明は一切書かず、必ず以下の3行をこの順番で出力すること：\n' +
+  '[emotion:normal または smile / angry / sad / love]（←最初に、このセリフの感情を決める）\n' +
   'JA: <キャラクターとしての日本語のセリフ（長さは気分で自然に変える。通常1〜2文、時々短い一言だけ）>\n' +
   '（注意：ユーザーの入力が中国語でも、JA は必ず日本語で書くこと。中国語のまま書かない。）\n' +
-  'ZH: <上のセリフを自然で口語的な簡体字中国語に訳した文。日本語ではなく必ず中国語。省略禁止。中国語でもキャラクターの口調（ツンデレ/ヤンデレ/優しい等）を保つ>\n' +
-  '[emotion:normal または smile / angry / sad / love]\n' +
+  'ZH: <上のセリフを自然で口語的な簡体字中国語に訳した文。日本語ではなく必ず中国語。省略禁止。括弧の演技指示は訳さずセリフだけを訳す。中国語でもキャラクターの口調（ツンデレ/ヤンデレ/優しい等）を保つ>\n' +
   '例：\n' +
-  'JA: べ、別に心配じゃないからね！\n' +
-  'ZH: 才、才不是担心你呢！\n' +
-  '[emotion:angry]';
+  '[emotion:angry]\n' +
+  'JA: （舌打ち）べ、別に心配じゃないからね！\n' +
+  'ZH: 哼，才、才不是担心你呢！';
 
 /* 回复质量规则：追加在角色 prompt 后，专治“公式化”——
    具体回应 / 句式变化 / 反应多样 / 记忆体现（格式契约 _OUTPUT_RULE 仍放最末尾保合规） */
@@ -57,6 +58,39 @@ SR._memoryBlock = function (history, personalityId) {
     lines.push('あなた: ' + String(recent[j].ja || '').slice(0, 80));
   }
   return '\n\n---\n【最近の会話記憶（あなたはこれらを覚えている。返信時、これらの返信と同じ出だし・文型の再利用は禁止）】\n' + lines.join('\n');
+};
+
+/* 声の演技指示ルール：把角色专属的安全 cue 词表告诉模型。
+   stepaudio-2.5-tts 会把 input 里全角括号内容当表演指令（不朗读）；
+   但审核对密着/性暗示词敏感（实测「甘くささやく」必被 HTTP 451 拦），故明确禁用 */
+SR._cueRule = function (personality) {
+  var cues = (personality && personality.tts && personality.tts.cues) || [];
+  if (!cues.length) return '';
+  return '\n\n---\n' +
+    '【声の演技指示／任意】JA のセリフには、必要なら全角括弧の演技指示を最大2つまで入れてよい。' +
+    '括弧の中は読み上げられず、声の演技（間・息づかい・抑揚）だけが変わる。\n' +
+    '使ってよい指示：' + cues.join(' ') + '\n' +
+    '禁止：（ささやく）（甘い息）（耳元で）（抱きしめる）など密着・性的な印象の指示は音声合成で弾かれるので絶対に使わない。' +
+    '指示は毎回必ず入れる必要はなく、入れない回も作ること。\n';
+};
+
+/* 去掉台词里的（）演技指示：字幕显示与浏览器语音用（否则会把它当正文念出来） */
+SR._stripCues = function (t) {
+  return String(t == null ? '' : t)
+    .replace(/（[^（）]*）/g, '')
+    .replace(/\([^()]*\)/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+};
+
+/* 合成全局语境 instruction：角色基调 + 当前情绪，上限 200 字符（stepaudio-2.5-tts 硬限制） */
+SR.ttsInstruction = function (personality, emotion) {
+  var t = (personality && personality.tts) || {};
+  var base = t.instruction || '';
+  var map = t.emotionInstructions || {};
+  var emo = map[emotion] || map.normal || '';
+  var s = (base + (emo ? '；' + emo : '')).replace(/\s+/g, '');
+  return s.slice(0, 200);
 };
 
 /* 解析真模型的双语输出：拆出 JA / ZH / emotion，容错缺标签的情况 */
@@ -184,7 +218,7 @@ SR._chatStream = function (url, apiKey, body, hooks) {
       if (hooks.onPartial) hooks.onPartial(full);
       if (!jaFired) {
         var ja = SR._jaSoFar(full);
-        if (ja && ja.complete && ja.text) { jaFired = true; if (hooks.onJaReady) hooks.onJaReady(ja.text); }
+        if (ja && ja.complete && ja.text) { jaFired = true; if (hooks.onJaReady) hooks.onJaReady(ja.text, full); }
       }
     };
     var pump = function () {
@@ -318,7 +352,7 @@ SR.adapters.stepfun = {
     var body = {
       model: (settings && settings.chatModel) || SR.adapters.stepfun.chatModel,
       messages: [
-        { role: 'system', content: personality.systemPrompt + SR._STYLE_RULE + SR._memoryBlock(history, personality.id) + SR._OUTPUT_RULE },
+        { role: 'system', content: personality.systemPrompt + SR._STYLE_RULE + SR._memoryBlock(history, personality.id) + SR._cueRule(personality) + SR._OUTPUT_RULE },
         { role: 'user', content: worry }
       ],
       temperature: 0.9,
@@ -357,7 +391,7 @@ SR.adapters.aiping = {
     var body = {
       model: (settings && settings.chatModel) || SR.adapters.aiping.chatModel,
       messages: [
-        { role: 'system', content: personality.systemPrompt + SR._STYLE_RULE + SR._memoryBlock(history, personality.id) + SR._OUTPUT_RULE },
+        { role: 'system', content: personality.systemPrompt + SR._STYLE_RULE + SR._memoryBlock(history, personality.id) + SR._cueRule(personality) + SR._OUTPUT_RULE },
         { role: 'user', content: worry }
       ],
       temperature: 0.9,
@@ -386,31 +420,43 @@ SR.adapters.aiping = {
 };
 
 /* ---------- 远端 TTS（StepFun 语音端点，需 Key） ----------
-   返回一个可播放的 objectURL；失败 reject，由调用方回退 Web Speech。 */
+   返回一个可播放的 objectURL；失败 reject，由调用方回退 Web Speech。
+   emotion 用于选情绪专属的全局语境 instruction（角色基调 + 情绪叠加）。
+   内容审核（HTTP 451 censorship_blocked）实测为组合式概率判定：演技指示/instruction
+   都可能触发，故失败时降级重试一次（去括号指示 + 去 instruction），避免语音静默丢失。 */
 SR.remoteTTS = {
-  synthesize: function (text, personality, settings) {
+  synthesize: function (text, personality, settings, emotion) {
     var url = 'https://api.stepfun.com/v1/audio/speech';
-    var body = {
-      model: 'stepaudio-2.5-tts',
-      input: text,
-      response_format: 'mp3'
+    var voice = (personality && personality.tts && personality.tts.voiceId) || '';
+    var mkBody = function (input, instruction) {
+      var b = { model: 'stepaudio-2.5-tts', input: input, response_format: 'mp3' };
+      if (voice) b.voice = voice;
+      if (instruction) b.instruction = instruction;
+      return b;
     };
-    if (personality && personality.tts) {
-      if (personality.tts.voiceId) body.voice = personality.tts.voiceId;
-      if (personality.tts.instruction) body.instruction = personality.tts.instruction;
-    }
-    return fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + (settings.apiKey || '')
-      },
-      body: JSON.stringify(body)
-    }).then(function (r) {
-      if (!r.ok) return SR._httpError(r, 'TTS ');
-      return r.blob();
-    }).then(function (blob) {
-      return URL.createObjectURL(blob);
+    var post = function (body) {
+      return fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + (settings.apiKey || '')
+        },
+        body: JSON.stringify(body)
+      }).then(function (r) {
+        if (!r.ok) return SR._httpError(r, 'TTS ');
+        return r.blob();
+      }).then(function (blob) {
+        return URL.createObjectURL(blob);
+      });
+    };
+    return post(mkBody(text, SR.ttsInstruction(personality, emotion))).catch(function (err) {
+      var msg = String((err && err.message) || '');
+      // 只对内容审核类失败降级重试；Key/网络/音色错误重试也是白花钱
+      if (!/451|censorship|blocked|content/i.test(msg)) throw err;
+      var plain = SR._stripCues(text);
+      if (!plain) throw err;
+      console.warn('[TTS] 审核拦截（' + msg + '），去演技指示与 instruction 重试：', plain);
+      return post(mkBody(plain, ''));
     });
   }
 };

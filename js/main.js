@@ -40,21 +40,22 @@ SR.main = (function () {
     // 开场白语音（优先预生成音频）
     if (SR.store.get().settings.autoSpeak) {
       var greetingSrc = 'assets/audio/' + id + '/greeting.mp3';
-      speakLine(p.greetingJa, p.greetingZh, p, greetingSrc);
+      speakLine(p.greetingJa, p.greetingZh, p, greetingSrc, 'normal');
       SR.ui.typeSubtitle(p.greetingZh);
       SR.ui.setSubtitleJa(p.greetingJa);
     }
   }
 
-  /* ---- 语音路由：远端 TTS -> 预生成音频 -> Web Speech(无日语音色时念中文字幕) ---- */
-  function speakLine(textJa, textZh, personality, audioSrc) {
+  /* ---- 语音路由：远端 TTS -> 预生成音频 -> Web Speech(无日语音色时念中文字幕) ----
+     emotion 会转成情绪专属的全局语境 instruction，让同一角色根据情绪“演”而不只是“念” */
+  function speakLine(textJa, textZh, personality, audioSrc, emotion) {
     var s = SR.store.get().settings;
     var onStart = function () { SR.store.set({ isSpeaking: true }, { persist: false }); };
     var onEnd = function () { SR.store.set({ isSpeaking: false }, { persist: false }); };
 
-    // 1) 远端 TTS（需 Key）
+    // 1) 远端 TTS（需 Key）：原文含（）演技指示，交给 stepaudio-2.5-tts 表演
     if (s.ttsEngine === 'remote' && s.apiKey) {
-      return SR.remoteTTS.synthesize(textJa, personality, s).then(function (objUrl) {
+      return SR.remoteTTS.synthesize(textJa, personality, s, emotion).then(function (objUrl) {
         return SR.audioPlayer.play(objUrl, { onstart: onStart, onend: onEnd });
       }).catch(function (err) {
         if (SR.ui && SR.ui.toast) SR.ui.toast('远端 TTS 失败（' + (err && err.message ? err.message : '网络/Key') + '），已回退浏览器语音', 'warn');
@@ -74,6 +75,7 @@ SR.main = (function () {
 
   function webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd) {
     if (!SR.speech.supported()) { onEnd(); return Promise.resolve(false); }
+    textJa = SR._stripCues(textJa) || textJa;   // 浏览器语音不懂（）演技指示，会当正文念出来
     var rate = (s.rate || 1) * (personality.tts ? personality.tts.speed : 1);
     var pitch = (s.pitch || 1) * (personality.tts ? personality.tts.pitch : 1);
     onStart();
@@ -104,12 +106,12 @@ SR.main = (function () {
     var wantSpeak = state.settings.autoSpeak;
     var ttsStarted = false;
     var firstToken = false;
-    var startSpeak = function (jaText, zhText, audioSrc) {
+    var startSpeak = function (jaText, zhText, audioSrc, emotion) {
       if (ttsStarted || !wantSpeak || !jaText) return;
       // 最后一道保险：无预生成音频时，绝不用非日语文本合成语音（防中文语音）
       if (!audioSrc && !SR._isJapanese(jaText)) { console.warn('[speak] 跳过非日语台词：', jaText); return; }
       ttsStarted = true;
-      speakLine(jaText, zhText || jaText, personality, audioSrc || null);
+      speakLine(jaText, zhText || jaText, personality, audioSrc || null, emotion);
     };
 
     // 流式回调：边到边显示字幕；JA 行一完成就并行去合成语音（不等整段回复）
@@ -118,7 +120,7 @@ SR.main = (function () {
       onPartial: function (full) {
         var pp = SR._parseBilingualPartial(full);
         if (pp.ja && SR._isJapanese(pp.ja)) {
-          SR.ui.setSubtitleJa(pp.ja);
+          SR.ui.setSubtitleJa(SR._stripCues(pp.ja));   // 字幕不显演技指示，只显台词
           if (zhPreview) { zhPreview = false; SR.ui.setSubtitleZh(''); }  // 收回开头纯汉字被误预览进中文槽的内容
         }
         if (pp.zh) { zhPreview = false; SR.ui.setSubtitleZh(pp.zh); }
@@ -127,10 +129,12 @@ SR.main = (function () {
         }
         if (!firstToken) { firstToken = true; SR.store.set({ isThinking: false }, { persist: false }); }
       },
-      onJaReady: function (jaText) {
+      onJaReady: function (jaText, full) {
         var s = SR.store.get().settings;
+        // emotion 已在首行给出，此刻就能拿到 → 提前合成也能用情绪专属 instruction
+        var emo = SR.emotionRouter.parseTag(full || '').emotion;
         // 仅当 JA 行确为日语才提前合成，避免模型把中文放进 JA 行时提前播中文
-        if (s.ttsEngine === 'remote' && s.apiKey && SR._isJapanese(jaText)) startSpeak(jaText, null, null);
+        if (s.ttsEngine === 'remote' && s.apiKey && SR._isJapanese(jaText)) startSpeak(jaText, null, null, emo);
       }
     };
 
@@ -139,10 +143,10 @@ SR.main = (function () {
       SR.ui.setImage(state.personalityId, reply.emotion);
       if (reply.source === 'real') {
         SR.ui.setSubtitleZh(reply.zh);   // 流式已渐进显示，这里定稿校正
-        SR.ui.setSubtitleJa(reply.ja);
+        SR.ui.setSubtitleJa(SR._stripCues(reply.ja));
       } else {
         SR.ui.typeSubtitle(reply.zh);    // 离线 Mock：自适应快速打字
-        SR.ui.setSubtitleJa(reply.ja);
+        SR.ui.setSubtitleJa(SR._stripCues(reply.ja));
       }
 
       // 记录历史
@@ -158,7 +162,7 @@ SR.main = (function () {
       var replyAudio = reply.audioKey
         ? ('assets/audio/' + state.personalityId + '/' + reply.audioKey + '.mp3')
         : null;
-      startSpeak(reply.ja, reply.zh, replyAudio);
+      startSpeak(reply.ja, reply.zh, replyAudio, reply.emotion);
     }).catch(function (err) {
       console.error(err);
       SR.store.set({ isThinking: false }, { persist: false });

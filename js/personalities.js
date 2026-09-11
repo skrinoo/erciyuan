@@ -20,7 +20,18 @@ SR.PERSONALITIES = [
       'xxx は normal / smile / angry / sad / love のいずれか。',
     tts: {
       voiceId: 'tianmeinvsheng', // 甜美女声（可转病态执拗）
-      instruction: '甜美少女声线，语气甜蜜中带一丝病态的执拗与占有欲，压低声音，语速偏慢，间歇带轻微颤音',
+      // instruction = 全局语境（≤200 字），设定整段基调；emotionInstructions 按情绪叠加
+      // 措辞经实测校准：避开「ささやく/甘い/压低声音+亲密内容」等会被 TTS 内容审核拦（HTTP 451）的组合
+      instruction: '甜美少女声线，语气轻柔黏人，语速偏慢，重音落在句尾，甜腻里透出一丝发凉的执念',
+      emotionInstructions: {
+        normal: '平静而专注，像在确认对方还在身边',
+        smile: '轻快的甜笑，声音上扬，尾音带一点得意',
+        angry: '压住火气的低沉，语速更慢，每个字咬得清楚',
+        sad: '声音发颤，像快哭又忍住，气息不稳',
+        love: '极轻极柔的告白语气，尾音黏着不肯放开'
+      },
+      // 文中语境：JA 台词里可用的全角括号演技指示（括号内容不朗读，只改表演）
+      cues: ['（小声で）', '（間）', '（ため息）', '（首をかしげて）', '（くすりと笑う）'],
       speed: 0.92, pitch: 1.2
     },
     // Mock 模式下的情绪倾向（加权随机）
@@ -43,7 +54,15 @@ SR.PERSONALITIES = [
       'xxx は normal / smile / angry / sad / love のいずれか。',
     tts: {
       voiceId: 'livelybreezy-female', // 活力少女（高亢别扭）
-      instruction: '活泼高亢的少女声线，语气傲娇别扭、句尾上扬，带害羞的停顿与口是心非',
+      instruction: '活泼高亢的少女声线，语气别扭傲娇，句尾上扬，带害羞的停顿与口是心非',
+      emotionInstructions: {
+        normal: '故作不耐烦，语速偏快，尾音硬生生收住',
+        smile: '忍不住笑出来又立刻板起脸，声音明亮跳脱',
+        angry: '音量拔高，语气冲，字句之间带短促停顿',
+        sad: '声音突然变小，倔强地憋着，句尾发闷',
+        love: '小声嘟囔，害羞到语句断续，最后几乎听不清'
+      },
+      cues: ['（舌打ち）', '（そっぽを向いて）', '（小声で）', '（顔を赤らめて）', '（ため息）'],
       speed: 1.08, pitch: 1.45
     },
     emotionBias: { angry: 0.28, smile: 0.22, love: 0.20, normal: 0.18, sad: 0.12 }
@@ -65,7 +84,15 @@ SR.PERSONALITIES = [
       'xxx は normal / smile / angry / sad / love のいずれか。',
     tts: {
       voiceId: 'wenroushunv', // 温柔熟女（包容母性）
-      instruction: '成熟温柔的女性声线，语速舒缓，充满包容与母性的抚慰感',
+      instruction: '成熟温柔的女性声线，语速舒缓，气息柔和，充满包容与抚慰感',
+      emotionInstructions: {
+        normal: '平稳温暖的倾听语气，句尾轻轻落下',
+        smile: '带着笑意的柔和语调，尾音微微上扬',
+        angry: '罕见地严肃，声音放低放慢，不怒自威',
+        sad: '心疼而克制，声音轻颤，停顿变多',
+        love: '像轻轻抱住对方似的温柔语气，尾音绵长'
+      },
+      cues: ['（微笑）', '（柔らかに）', '（うなずいて）', '（ため息）', '（間）'],
       speed: 0.9, pitch: 1.0
     },
     emotionBias: { smile: 0.35, normal: 0.25, love: 0.20, sad: 0.12, angry: 0.08 }
