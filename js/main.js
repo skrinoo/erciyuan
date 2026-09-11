@@ -98,6 +98,8 @@ SR.main = (function () {
     el.input.value = '';
     SR.speech.cancel();
     SR.store.set({ isThinking: true, isSpeaking: false }, { persist: false });
+    SR.ui.setSubtitleZh('');   // 清空上一条字幕，避免“思考中”/流式 JA 阶段残留旧文本
+    SR.ui.setSubtitleJa('');
 
     var wantSpeak = state.settings.autoSpeak;
     var ttsStarted = false;
