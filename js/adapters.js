@@ -26,7 +26,13 @@ SR.adapters.mock = {
           audioKey = 'c' + hitIndex; // 对应预生成女声音频 assets/audio/<pid>/c<i>.mp3
         } else {
           var fb = SR.MOCK_FALLBACK[personality.id] || [];
-          hit = fb.length ? fb[Math.floor(Math.random() * fb.length)] : { emotion: 'normal', ja: '…うん。', zh: '……嗯。' };
+          if (fb.length) {
+            var fi = Math.floor(Math.random() * fb.length);
+            hit = fb[fi];
+            audioKey = 'f' + fi; // 预生成兜底女声音频 assets/audio/<pid>/f<i>.mp3
+          } else {
+            hit = { emotion: 'normal', ja: '…うん。', zh: '……嗯。' };
+          }
         }
         resolve({ ja: hit.ja, zh: hit.zh, emotion: SR.emotionRouter.normalize(hit.emotion), audioKey: audioKey });
       }, 500 + Math.random() * 500);

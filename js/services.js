@@ -91,7 +91,21 @@ SR.speech = {
       }
       if (!chosen) {
         var langRe = new RegExp('^' + useLang.slice(0, 2), 'i');
-        for (i = 0; i < pool.length; i++) if (langRe.test(pool[i].lang)) { chosen = pool[i]; break; }
+        var sameLang = [];
+        for (i = 0; i < pool.length; i++) if (langRe.test(pool[i].lang)) sameLang.push(pool[i]);
+        // 优先女声（名字含女性线索且不含男性线索），避免兜底时选到系统男声
+        var femaleRe = /(\bfemale\b|\bwoman\b|\bgirl\b|huihui|yaoyao|xiaoxiao|xiaoyi|nanami|ayumi|haruka|momoko|女)/i;
+        var maleRe = /(\bmale\b|\bman\b|\bboy\b|kangkang|\byun\b|yunyang|yunxi|yunjian|ichiro|keita|男)/i;
+        for (i = 0; i < sameLang.length; i++) {
+          var nm = sameLang[i].name || '';
+          if (femaleRe.test(nm) && !maleRe.test(nm)) { chosen = sameLang[i]; break; }
+        }
+        if (!chosen) {
+          for (i = 0; i < sameLang.length; i++) {
+            if (!maleRe.test(sameLang[i].name || '')) { chosen = sameLang[i]; break; }
+          }
+        }
+        if (!chosen && sameLang.length) chosen = sameLang[0];
       }
       if (chosen) u.voice = chosen;
       u.onstart = function () { if (opts.onstart) opts.onstart(); };

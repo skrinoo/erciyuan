@@ -36,13 +36,18 @@ SR.ui = (function () {
     layers.a = el.layerA; layers.b = el.layerB;
   }
 
-  /* ---- 立绘切换（交叉淡入 + 情绪 pop） ---- */
+  /* ---- 立绘切换（预加载 + 交叉淡入 + 情绪 pop） ---- */
+  var imgSeq = 0; // 切换序号：快速来回切换时丢弃过期的加载回调，避免层状态错乱
   function setImage(personalityId, emotion) {
     var src = SR.CONFIG.imageFor(personalityId, emotion);
-    var front = layers[layers.front];
-    var back = layers[layers.front === 'a' ? 'b' : 'a'];
-    back.src = src;
-    back.onload = function () {
+    var seq = ++imgSeq;
+    // 先用独立 Image 预加载；成功后再放到背面层并切换可见，杜绝“直接改可见层 src”导致的闪烁/停留在上一张
+    var pre = new Image();
+    pre.onload = function () {
+      if (seq !== imgSeq) return; // 已有更新的切换请求，本次作废
+      var front = layers[layers.front];
+      var back = layers[layers.front === 'a' ? 'b' : 'a'];
+      back.src = src; // 已预加载，命中缓存即时渲染
       front.classList.remove('active');
       back.classList.add('active');
       layers.front = (layers.front === 'a' ? 'b' : 'a');
@@ -51,9 +56,8 @@ SR.ui = (function () {
       void el.charWrap.offsetWidth; // 强制 reflow 重启动画
       el.charWrap.classList.add('emote-pop');
     };
-    back.onerror = function () { /* 缺图时保持当前层 */ };
-    // 若图片已缓存 onload 可能不触发，兜底直接切
-    if (back.complete && back.naturalWidth > 0) back.onload();
+    pre.onerror = function () { /* 缺图时保持当前层 */ };
+    pre.src = src;
   }
 
   /* ---- 打字机字幕 ---- */
