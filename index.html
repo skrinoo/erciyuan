@@ -90,6 +90,10 @@
             <input id="set-apikey" class="field-input" type="password" placeholder="sk-..." autocomplete="off" />
           </label>
           <label class="field">
+            <span class="field-label">对话模型（可选，留空用默认）</span>
+            <input id="set-chat-model" class="field-input" type="text" placeholder="StepFun 默认 step-3.7-flash" autocomplete="off" />
+          </label>
+          <label class="field">
             <span class="field-label">语音引擎</span>
             <select id="set-tts-engine" class="field-input">
               <option value="webspeech">浏览器 Web Speech（免费）</option>
@@ -115,6 +119,7 @@
           <p class="settings-note">
             提示：填入 API Key 会自动切到 StepFun 真模型 + 远端 TTS（可在上方下拉调整）；清空 Key 则切回离线 Mock。
             远端 TTS 目前仅走 StepFun 音色，请填 StepFun 的 Key；aiping 的 Key 仅用于对话。
+            若提示“model does not exist”，在“对话模型”里改成你的 Key 可用的模型（StepFun 默认 step-3.7-flash）。
             任何真模型调用失败都会自动回退（Mock / 浏览器语音）并弹出提示，保证游戏不中断。
           </p>
         </div>

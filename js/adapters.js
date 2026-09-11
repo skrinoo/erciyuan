@@ -59,11 +59,11 @@ SR.adapters.stepfun = {
   id: 'stepfun',
   name: 'StepFun',
   baseUrl: 'https://api.stepfun.com/v1',
-  chatModel: 'step-2-16k',
+  chatModel: 'step-3.7-flash',
   generateReply: function (worry, personality, settings) {
     var url = SR.adapters.stepfun.baseUrl + '/chat/completions';
     var body = {
-      model: SR.adapters.stepfun.chatModel,
+      model: (settings && settings.chatModel) || SR.adapters.stepfun.chatModel,
       messages: [
         { role: 'system', content: personality.systemPrompt },
         { role: 'user', content: worry }
@@ -103,7 +103,7 @@ SR.adapters.aiping = {
   generateReply: function (worry, personality, settings) {
     var url = SR.adapters.aiping.baseUrl + '/chat/completions';
     var body = {
-      model: SR.adapters.aiping.chatModel,
+      model: (settings && settings.chatModel) || SR.adapters.aiping.chatModel,
       messages: [
         { role: 'system', content: personality.systemPrompt },
         { role: 'user', content: worry }

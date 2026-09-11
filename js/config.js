@@ -23,6 +23,7 @@ SR.CONFIG = {
   DEFAULT_SETTINGS: {
     adapter: 'mock',        // mock | stepfun | aiping
     apiKey: '',
+    chatModel: '',          // 空 = 用适配器默认模型；可覆盖为你的 Key 支持的模型
     ttsEngine: 'webspeech', // webspeech | remote
     rate: 1.0,
     pitch: 1.0,

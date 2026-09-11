@@ -133,6 +133,7 @@ SR.main = (function () {
     var s = SR.store.get().settings;
     el.setAdapter.value = s.adapter;
     el.setApiKey.value = s.apiKey || '';
+    el.setChatModel.value = s.chatModel || '';
     el.setTtsEngine.value = s.ttsEngine;
     el.setRate.value = s.rate;
     el.setPitch.value = s.pitch;
@@ -195,6 +196,7 @@ SR.main = (function () {
       else if (switched) SR.ui.toast('已启用：' + switched + '（可在设置里调整）', 'ok');
     };
     el.setTtsEngine.onchange = function () { SR.store.set({ settings: Object.assign({}, SR.store.get().settings, { ttsEngine: el.setTtsEngine.value }) }); };
+    el.setChatModel.onchange = function () { SR.store.set({ settings: Object.assign({}, SR.store.get().settings, { chatModel: (el.setChatModel.value || '').trim() }) }); };
     el.setRate.oninput = function () {
       el.outRate.textContent = Number(el.setRate.value).toFixed(2);
       SR.store.set({ settings: Object.assign({}, SR.store.get().settings, { rate: parseFloat(el.setRate.value) }) });

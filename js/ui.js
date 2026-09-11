@@ -26,6 +26,7 @@ SR.ui = (function () {
     el.settingsOverlay = document.getElementById('settings-overlay');
     el.setAdapter = document.getElementById('set-adapter');
     el.setApiKey = document.getElementById('set-apikey');
+    el.setChatModel = document.getElementById('set-chat-model');
     el.setTtsEngine = document.getElementById('set-tts-engine');
     el.setRate = document.getElementById('set-rate');
     el.setPitch = document.getElementById('set-pitch');
