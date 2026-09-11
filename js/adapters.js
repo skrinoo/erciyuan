@@ -98,6 +98,30 @@ SR._extractDelta = function (s) {
   } catch (e) { return ''; }
 };
 
+/* 取推理/思考增量（思考型模型放在 delta.reasoning_content）。
+   思考也消耗 max_tokens：思考把额度用尽时正文会空——用于诊断与重试决策 */
+SR._extractReasoning = function (s) {
+  if (!s) return '';
+  try {
+    var j = JSON.parse(s);
+    var ch = j.choices && j.choices[0];
+    if (ch && ch.delta && typeof ch.delta.reasoning_content === 'string') return ch.delta.reasoning_content;
+    return '';
+  } catch (e) { return ''; }
+};
+
+/* 非流式单次调用：流式正文空时的兜底重试 */
+SR._chatOnce = function (url, apiKey, body) {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (apiKey || '') },
+    body: JSON.stringify(body)
+  }).then(function (r) {
+    if (!r.ok) return SR._httpError(r);
+    return r.text();
+  }).then(function (t) { return SR._contentFromJson(t) || t; });
+};
+
 /* 从整段非流式 JSON 响应取 message.content（流式不可用时兜底） */
 SR._contentFromJson = function (t) {
   try {
@@ -149,13 +173,13 @@ SR._chatStream = function (url, apiKey, body, hooks) {
     if (!canStream) return r.text().then(function (t) { return SR._contentFromJson(t) || t; });
     var reader = r.body.getReader();
     var dec = new TextDecoder('utf-8');
-    var full = '', rawAll = '', sseBuf = '', jaFired = false;
+    var full = '', reasonBuf = '', rawAll = '', sseBuf = '', jaFired = false;
     var eat = function (line) {
       line = line.replace(/\r$/, '').trim();
       if (!line || line === 'data: [DONE]' || line === '[DONE]') return;
       if (line.indexOf('data:') === 0) line = line.slice(5).trim();
       var d = SR._extractDelta(line);
-      if (!d) return;
+      if (!d) { reasonBuf += SR._extractReasoning(line); return; }
       full += d;
       if (hooks.onPartial) hooks.onPartial(full);
       if (!jaFired) {
@@ -177,7 +201,7 @@ SR._chatStream = function (url, apiKey, body, hooks) {
     return pump().then(function () {
       if (sseBuf) eat(sseBuf);
       if (!full.trim()) full = SR._contentFromJson(rawAll) || '';
-      return full;
+      return { text: full, reasoning: reasonBuf };
     });
   });
 };
@@ -298,12 +322,23 @@ SR.adapters.stepfun = {
         { role: 'user', content: worry }
       ],
       temperature: 0.9,
-      max_tokens: 500,   // 放宽上限，避免截断把 ZH 行切掉
+      max_tokens: 2048,  // 思考型模型余量：思考也消耗 max_tokens，不足则正文空（“空响应”回退 Mock）
       stream: true       // 流式：边生成边上字幕，JA 行完成即并行触发 TTS
     };
     return SR._chatStream(SR.adapters.stepfun.baseUrl + '/chat/completions', settings.apiKey, body, hooks)
+      .then(function (res) {
+        var raw = res && res.text;
+        if (!raw || !raw.trim()) {
+          // 正文空（思考用尽额度 / SSE 异常）：非流式重试一次
+          var body2 = Object.assign({}, body, { stream: false });
+          return SR._chatOnce(SR.adapters.stepfun.baseUrl + '/chat/completions', settings.apiKey, body2).then(function (t) {
+            if (!t || !t.trim()) throw new Error('空响应' + (res.reasoning ? '（模型思考用尽 max_tokens，重试仍空）' : ''));
+            return t;
+          });
+        }
+        return raw;
+      })
       .then(function (raw) {
-        if (!raw || !raw.trim()) throw new Error('空响应');
         var r = SR._parseBilingual(raw);
         return SR._fixBilingual(r, SR.adapters.stepfun.baseUrl,
           (settings && settings.chatModel) || SR.adapters.stepfun.chatModel, settings.apiKey, personality)
@@ -326,12 +361,22 @@ SR.adapters.aiping = {
         { role: 'user', content: worry }
       ],
       temperature: 0.9,
-      max_tokens: 500,
+      max_tokens: 2048,
       stream: true
     };
     return SR._chatStream(SR.adapters.aiping.baseUrl + '/chat/completions', settings.apiKey, body, hooks)
+      .then(function (res) {
+        var raw = res && res.text;
+        if (!raw || !raw.trim()) {
+          var body2 = Object.assign({}, body, { stream: false });
+          return SR._chatOnce(SR.adapters.aiping.baseUrl + '/chat/completions', settings.apiKey, body2).then(function (t) {
+            if (!t || !t.trim()) throw new Error('空响应' + (res.reasoning ? '（模型思考用尽 max_tokens，重试仍空）' : ''));
+            return t;
+          });
+        }
+        return raw;
+      })
       .then(function (raw) {
-        if (!raw || !raw.trim()) throw new Error('空响应');
         var r = SR._parseBilingual(raw);
         return SR._fixBilingual(r, SR.adapters.aiping.baseUrl,
           (settings && settings.chatModel) || SR.adapters.aiping.chatModel, settings.apiKey, personality)
