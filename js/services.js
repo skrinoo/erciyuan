@@ -119,17 +119,26 @@ SR.speech = {
 /* ---------- 远端音频播放（预生成 mp3 等） ---------- */
 SR.audioPlayer = {
   _el: null,
+  // 直接播放音频；播放成功开始即 resolve(true)，加载失败/被自动播放策略拦截则 resolve(false)，由调用方兜底。
   play: function (src, opts) {
     opts = opts || {};
     return new Promise(function (resolve) {
       if (!src) { resolve(false); return; }
       if (!SR.audioPlayer._el) SR.audioPlayer._el = new Audio();
       var el = SR.audioPlayer._el;
-      el.src = src;
+      var settled = false;
+      var done = function (ok) { if (!settled) { settled = true; resolve(ok); } };
       el.onplay = function () { if (opts.onstart) opts.onstart(); };
-      el.onended = function () { if (opts.onend) opts.onend(); resolve(true); };
-      el.onerror = function () { if (opts.onend) opts.onend(); resolve(false); };
-      el.play().catch(function () { if (opts.onend) opts.onend(); resolve(false); });
+      el.onended = function () { if (opts.onend) opts.onend(); };
+      el.onerror = function () { if (opts.onend) opts.onend(); done(false); };
+      el.src = src;
+      var p = el.play();
+      if (p && p.then) {
+        p.then(function () { done(true); })
+         .catch(function () { if (opts.onend) opts.onend(); done(false); });
+      } else {
+        done(true);
+      }
     });
   },
   stop: function () { if (SR.audioPlayer._el) { SR.audioPlayer._el.pause(); } }

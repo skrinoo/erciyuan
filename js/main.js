@@ -60,10 +60,10 @@ SR.main = (function () {
         return webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd);
       });
     }
-    // 2) 预生成音频（如开场白）
+    // 2) 预生成音频：直接播放（缺文件/播放失败才兜底 Web Speech），不再用易超时的 probe 预探测
     if (audioSrc) {
-      return probe(audioSrc).then(function (ok) {
-        if (ok) return SR.audioPlayer.play(audioSrc, { onstart: onStart, onend: onEnd });
+      return SR.audioPlayer.play(audioSrc, { onstart: onStart, onend: onEnd }).then(function (played) {
+        if (played) return true;
         return webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd);
       });
     }
@@ -83,20 +83,6 @@ SR.main = (function () {
       fallbackText: textZh,
       fallbackLang: 'zh-CN',
       onend: onEnd
-    });
-  }
-
-  // 探测音频文件是否存在（file:// 下 fetch 不可靠，用 Image/Audio 探测）
-  function probe(src) {
-    return new Promise(function (resolve) {
-      var a = new Audio();
-      var done = false;
-      var finish = function (ok) { if (!done) { done = true; resolve(ok); } };
-      a.oncanplaythrough = function () { finish(true); };
-      a.onerror = function () { finish(false); };
-      a.preload = 'metadata';
-      a.src = src;
-      setTimeout(function () { finish(false); }, 1500);
     });
   }
 
