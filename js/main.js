@@ -19,6 +19,37 @@ SR.main = (function () {
     bindEvents();
     syncSettingsUI();
     SR.ui.renderHistory(state);
+    checkBuildFreshness();
+  }
+
+  /* ---- 版本自检：浏览器跑旧缓存/旧标签页是“双中文+中文语音”复发的历史根因，
+     而旧代码无法被远端修复。故新代码启动时拉线上 index.html（no-store）比对 main.js 的 ?v=，
+     过旧则提示并自动刷新一次；长开标签页每 5 分钟复查，部署后无需用户手动强刷 ---- */
+  function deployedVersion() {
+    return fetch('index.html?_sr=' + Date.now(), { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.text() : ''; })
+      .then(function (t) {
+        var m = /js\/main\.js\?v=([A-Za-z0-9]+)/.exec(t || '');
+        return m ? m[1] : '';
+      })
+      .catch(function () { return ''; });   // file:// 或断网时静默跳过
+  }
+
+  function checkBuildFreshness() {
+    var run = function () {
+      deployedVersion().then(function (v) {
+        if (!v || v === SR.BUILD) return;
+        console.warn('[SR] 页面版本过旧：本地 ' + SR.BUILD + ' / 线上 ' + v);
+        var last = 0;
+        try { last = Number(sessionStorage.getItem('sr_reload_ts') || 0); } catch (e) {}
+        if (Date.now() - last < 60000) return;   // 60s 内不重复刷，防循环
+        try { sessionStorage.setItem('sr_reload_ts', String(Date.now())); } catch (e2) {}
+        if (SR.ui && SR.ui.toast) SR.ui.toast('检测到页面缓存过旧，自动刷新…', 'warn');
+        setTimeout(function () { location.reload(); }, 900);
+      });
+    };
+    run();
+    setInterval(run, 5 * 60 * 1000);
   }
 
   /* ---- 切换性格 ---- */

@@ -1,6 +1,10 @@
 /* 全局配置与常量（经典脚本，挂载到 window.SR 命名空间） */
 window.SR = window.SR || {};
 
+/* 构建戳：与 index.html 的 ?v= 保持一致；main.js 用它与线上 index.html 比对，
+   发现浏览器在跑旧缓存时提示并自动刷新（“双中文/中文语音”复发的根因就是旧缓存） */
+SR.BUILD = '20260911f';
+
 SR.CONFIG = {
   // 情绪枚举（与立绘文件名一一对应）
   EMOTIONS: ['normal', 'smile', 'angry', 'sad', 'love'],

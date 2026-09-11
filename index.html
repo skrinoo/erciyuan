@@ -3,15 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- 文档本身禁缓存：index.html 一旦被浏览器的旧缓存命中，就会引用旧版 JS，
+       是“双中文/中文语音”这类已修复 bug 复发的历史根因 -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <title>こころのよりどころ · 心灵依靠 | 解压小游戏</title>
   <!-- 预连接真模型/TTS 域名：省去首次请求的 DNS+TCP+TLS 握手（约 100~300ms） -->
   <link rel="preconnect" href="https://api.stepfun.com" crossorigin />
   <link rel="dns-prefetch" href="https://api.stepfun.com" />
   <link rel="dns-prefetch" href="https://api.aiping.cn" />
   <!-- 本地资源带版本号：修复后强制浏览器/CDN 取新文件，避免缓存旧 JS 导致 bug 复发 -->
-  <link rel="stylesheet" href="styles/main.css?v=20260911e" />
-  <link rel="stylesheet" href="styles/character.css?v=20260911e" />
-  <link rel="stylesheet" href="styles/themes.css?v=20260911e" />
+  <link rel="stylesheet" href="styles/main.css?v=20260911f" />
+  <link rel="stylesheet" href="styles/character.css?v=20260911f" />
+  <link rel="stylesheet" href="styles/themes.css?v=20260911f" />
 </head>
 <body>
   <div id="app" class="app" data-personality="yandere">
@@ -135,13 +140,13 @@
   </div>
 
   <!-- 经典脚本（非 module），保证 file:// 双击可直接打开；?v= 版本号防缓存 -->
-  <script src="js/config.js?v=20260911e"></script>
-  <script src="js/personalities.js?v=20260911e"></script>
-  <script src="js/mockCorpus.js?v=20260911e"></script>
-  <script src="js/services.js?v=20260911e"></script>
-  <script src="js/adapters.js?v=20260911e"></script>
-  <script src="js/store.js?v=20260911e"></script>
-  <script src="js/ui.js?v=20260911e"></script>
-  <script src="js/main.js?v=20260911e"></script>
+  <script src="js/config.js?v=20260911f"></script>
+  <script src="js/personalities.js?v=20260911f"></script>
+  <script src="js/mockCorpus.js?v=20260911f"></script>
+  <script src="js/services.js?v=20260911f"></script>
+  <script src="js/adapters.js?v=20260911f"></script>
+  <script src="js/store.js?v=20260911f"></script>
+  <script src="js/ui.js?v=20260911f"></script>
+  <script src="js/main.js?v=20260911f"></script>
 </body>
 </html>
