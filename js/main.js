@@ -76,6 +76,7 @@ SR.main = (function () {
   function webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd) {
     if (!SR.speech.supported()) { onEnd(); return Promise.resolve(false); }
     textJa = SR._stripCues(textJa) || textJa;   // 浏览器语音不懂（）演技指示，会当正文念出来
+    textZh = SR._stripCues(textZh) || textZh;   // 无日语音色时会念中文兜底文本，同样要剔除
     var rate = (s.rate || 1) * (personality.tts ? personality.tts.speed : 1);
     var pitch = (s.pitch || 1) * (personality.tts ? personality.tts.pitch : 1);
     onStart();
