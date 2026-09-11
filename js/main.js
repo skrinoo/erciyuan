@@ -106,16 +106,25 @@ SR.main = (function () {
     var firstToken = false;
     var startSpeak = function (jaText, zhText, audioSrc) {
       if (ttsStarted || !wantSpeak || !jaText) return;
+      // 最后一道保险：无预生成音频时，绝不用非日语文本合成语音（防中文语音）
+      if (!audioSrc && !SR._isJapanese(jaText)) { console.warn('[speak] 跳过非日语台词：', jaText); return; }
       ttsStarted = true;
       speakLine(jaText, zhText || jaText, personality, audioSrc || null);
     };
 
     // 流式回调：边到边显示字幕；JA 行一完成就并行去合成语音（不等整段回复）
+    var zhPreview = false;   // 模型只给中文时把中文实时预览到中文槽；日文槽只收日语
     var hooks = {
       onPartial: function (full) {
         var pp = SR._parseBilingualPartial(full);
-        if (pp.ja) SR.ui.setSubtitleJa(pp.ja);
-        if (pp.zh) SR.ui.setSubtitleZh(pp.zh);
+        if (pp.ja && SR._isJapanese(pp.ja)) {
+          SR.ui.setSubtitleJa(pp.ja);
+          if (zhPreview) { zhPreview = false; SR.ui.setSubtitleZh(''); }  // 收回开头纯汉字被误预览进中文槽的内容
+        }
+        if (pp.zh) { zhPreview = false; SR.ui.setSubtitleZh(pp.zh); }
+        else if (pp.ja && !SR._isJapanese(pp.ja) && SR._isChinese(pp.ja) && !/^\s*(JA|ZH)\s*[:：]/i.test(full)) {
+          zhPreview = true; SR.ui.setSubtitleZh(pp.ja);   // 无标签的纯中文回复：中文槽实时预览
+        }
         if (!firstToken) { firstToken = true; SR.store.set({ isThinking: false }, { persist: false }); }
       },
       onJaReady: function (jaText) {

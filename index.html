@@ -8,9 +8,10 @@
   <link rel="preconnect" href="https://api.stepfun.com" crossorigin />
   <link rel="dns-prefetch" href="https://api.stepfun.com" />
   <link rel="dns-prefetch" href="https://api.aiping.cn" />
-  <link rel="stylesheet" href="styles/main.css" />
-  <link rel="stylesheet" href="styles/character.css" />
-  <link rel="stylesheet" href="styles/themes.css" />
+  <!-- 本地资源带版本号：修复后强制浏览器/CDN 取新文件，避免缓存旧 JS 导致 bug 复发 -->
+  <link rel="stylesheet" href="styles/main.css?v=20260911a" />
+  <link rel="stylesheet" href="styles/character.css?v=20260911a" />
+  <link rel="stylesheet" href="styles/themes.css?v=20260911a" />
 </head>
 <body>
   <div id="app" class="app" data-personality="yandere">
@@ -133,14 +134,14 @@
 
   </div>
 
-  <!-- 经典脚本（非 module），保证 file:// 双击可直接打开 -->
-  <script src="js/config.js"></script>
-  <script src="js/personalities.js"></script>
-  <script src="js/mockCorpus.js"></script>
-  <script src="js/services.js"></script>
-  <script src="js/adapters.js"></script>
-  <script src="js/store.js"></script>
-  <script src="js/ui.js"></script>
-  <script src="js/main.js"></script>
+  <!-- 经典脚本（非 module），保证 file:// 双击可直接打开；?v= 版本号防缓存 -->
+  <script src="js/config.js?v=20260911a"></script>
+  <script src="js/personalities.js?v=20260911a"></script>
+  <script src="js/mockCorpus.js?v=20260911a"></script>
+  <script src="js/services.js?v=20260911a"></script>
+  <script src="js/adapters.js?v=20260911a"></script>
+  <script src="js/store.js?v=20260911a"></script>
+  <script src="js/ui.js?v=20260911a"></script>
+  <script src="js/main.js?v=20260911a"></script>
 </body>
 </html>

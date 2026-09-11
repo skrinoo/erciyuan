@@ -24,6 +24,7 @@ SR._OUTPUT_RULE =
   '\n\n---\n' +
   '【最優先・出力フォーマット／絶対厳守】他の説明は一切書かず、必ず以下の3行をこの順番で出力すること：\n' +
   'JA: <キャラクターとしての日本語のセリフ（1〜2文）>\n' +
+  '（注意：ユーザーの入力が中国語でも、JA は必ず日本語で書くこと。中国語のまま書かない。）\n' +
   'ZH: <上のセリフを自然で口語的な簡体字中国語に訳した文。日本語ではなく必ず中国語。省略禁止>\n' +
   '[emotion:normal または smile / angry / sad / love]\n' +
   '例：\n' +
@@ -195,18 +196,27 @@ SR._translate = function (text, dir, baseUrl, apiKey, model) {
   }).catch(function () { return ''; });
 };
 
+/* 翻译带一次重试：第一次失败或译文语言不对时再试一次，仍失败返回 '' */
+SR._translateTwice = function (text, dir, baseUrl, apiKey, model) {
+  return SR._translate(text, dir, baseUrl, apiKey, model).then(function (t) {
+    if (t) return t;
+    return SR._translate(text, dir, baseUrl, apiKey, model);
+  });
+};
+
 /* 统一校正双语：保证 ja 是日语、zh 是中文；缺哪一边就用另一边翻译补齐。
    覆盖模型只给日语(漏中文)、只给中文(漏日语)、标签错配等所有情况。 */
 SR._fixBilingual = function (r, baseUrl, model, apiKey, personality) {
   var jaJ = SR._isJapanese(r.ja) ? r.ja : (SR._isJapanese(r.zh) ? r.zh : '');
   var zhC = SR._isChinese(r.zh) ? r.zh : (SR._isChinese(r.ja) ? r.ja : '');
   var chain = Promise.resolve();
-  if (!zhC && jaJ) chain = chain.then(function () { return SR._translate(jaJ, 'ja2zh', baseUrl, apiKey, model).then(function (z) { if (z) zhC = z; }); });
-  if (!jaJ && zhC) chain = chain.then(function () { return SR._translate(zhC, 'zh2ja', baseUrl, apiKey, model).then(function (j) { if (j) jaJ = j; }); });
+  if (!zhC && jaJ) chain = chain.then(function () { return SR._translateTwice(jaJ, 'ja2zh', baseUrl, apiKey, model).then(function (z) { if (z) zhC = z; }); });
+  if (!jaJ && zhC) chain = chain.then(function () { return SR._translateTwice(zhC, 'zh2ja', baseUrl, apiKey, model).then(function (j) { if (j) jaJ = j; }); });
   return chain.then(function () {
+    // 翻译彻底失败时宁可留空，也绝不把错误语言的文本填回字幕/语音（防“双中文/中文语音”复发）
     return {
-      ja: jaJ || r.ja || r.zh || '',
-      zh: zhC || jaJ || r.zh || r.ja || '',
+      ja: jaJ || '',
+      zh: zhC || '',
       emotion: r.emotion || SR.emotionRouter.weighted(personality)
     };
   });
