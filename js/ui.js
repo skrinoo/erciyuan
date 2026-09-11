@@ -60,6 +60,22 @@ SR.ui = (function () {
     pre.src = src;
   }
 
+  /* ---- 预加载立绘：先三张 normal（切换性格即时），其余情绪图延后加载 ---- */
+  function preloadImages() {
+    if (!SR.PERSONALITIES || !SR.CONFIG) return;
+    var normals = [], rest = [];
+    SR.PERSONALITIES.forEach(function (p) {
+      SR.CONFIG.EMOTIONS.forEach(function (e) {
+        var s = SR.CONFIG.imageFor(p.id, e);
+        if (e === 'normal') normals.push(s); else rest.push(s);
+      });
+    });
+    normals.forEach(function (s) { var im = new Image(); im.src = s; });
+    setTimeout(function () {
+      rest.forEach(function (s) { var im = new Image(); im.src = s; });
+    }, 1500);
+  }
+
   /* ---- 打字机字幕 ---- */
   function typeSubtitle(text) {
     if (typeTimer) clearInterval(typeTimer);
@@ -140,6 +156,7 @@ SR.ui = (function () {
     cache: cache,
     el: function () { return el; },
     setImage: setImage,
+    preloadImages: preloadImages,
     typeSubtitle: typeSubtitle,
     renderHistory: renderHistory,
     populateVoices: populateVoices,

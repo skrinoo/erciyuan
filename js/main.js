@@ -14,6 +14,7 @@ SR.main = (function () {
 
     // 初始立绘 + 问候
     applyPersonality(state.personalityId, true);
+    SR.ui.preloadImages(); // 预加载立绘，消除切换性格/情绪时的等待
 
     bindEvents();
     syncSettingsUI();
