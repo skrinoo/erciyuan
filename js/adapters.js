@@ -160,14 +160,22 @@ SR._isChinese = function (t) {
   return /[\u4e00-\u9fff]/.test(t) && !/[\u3040-\u30ff]/.test(t);
 };
 
-/* 模型漏给/错给中文字幕时的兜底：单独发一次轻量翻译请求，把日语台词译成简体中文 */
-SR._translateJaToZh = function (ja, baseUrl, apiKey, model) {
-  if (!ja) return Promise.resolve('');
+/* 判断文本是否为日语（含假名）：用于检测模型是否漏给/错给日语台词 */
+SR._isJapanese = function (t) {
+  return /[\u3040-\u30ff]/.test(t || '');
+};
+
+/* 轻量翻译兜底：dir='ja2zh'(日→中) 或 'zh2ja'(中→日)；返回译文，失败返回 '' */
+SR._translate = function (text, dir, baseUrl, apiKey, model) {
+  if (!text) return Promise.resolve('');
+  var sys = (dir === 'zh2ja')
+    ? 'あなたは翻訳者です。以下の中国語セリフを、自然で口語的な日本語（アニメの少女のセリフ調）に訳し、訳文だけを1行で返してください。説明・タグ・接頭辞は不要。'
+    : 'あなたは翻訳者です。以下の日本語セリフを自然で口語的な簡体字中国語に訳し、訳文だけを1行で返してください。説明・タグ・接頭辞は不要。';
   var body = {
     model: model,
     messages: [
-      { role: 'system', content: 'あなたは翻訳者です。以下の日本語セリフを自然で口語的な簡体字中国語に訳し、訳文だけを1行で返してください。説明・タグ・接頭辞は不要。' },
-      { role: 'user', content: ja }
+      { role: 'system', content: sys },
+      { role: 'user', content: text }
     ],
     temperature: 0.3,
     max_tokens: 200
@@ -181,9 +189,27 @@ SR._translateJaToZh = function (ja, baseUrl, apiKey, model) {
     return r.json();
   }).then(function (data) {
     var c = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || '';
-    c = String(c).replace(/\[emotion:[^\]]*\]?/gi, '').replace(/^\s*(ZH|中文|中国語)\s*[:：]\s*/i, '').trim();
-    return SR._isChinese(c) ? c : '';
+    c = String(c).replace(/\[emotion:[^\]]*\]?/gi, '').replace(/^\s*(JA|ZH|中文|中国語|日本語)\s*[:：]\s*/i, '').trim();
+    if (dir === 'ja2zh') return SR._isChinese(c) ? c : '';
+    return SR._isJapanese(c) ? c : '';
   }).catch(function () { return ''; });
+};
+
+/* 统一校正双语：保证 ja 是日语、zh 是中文；缺哪一边就用另一边翻译补齐。
+   覆盖模型只给日语(漏中文)、只给中文(漏日语)、标签错配等所有情况。 */
+SR._fixBilingual = function (r, baseUrl, model, apiKey, personality) {
+  var jaJ = SR._isJapanese(r.ja) ? r.ja : (SR._isJapanese(r.zh) ? r.zh : '');
+  var zhC = SR._isChinese(r.zh) ? r.zh : (SR._isChinese(r.ja) ? r.ja : '');
+  var chain = Promise.resolve();
+  if (!zhC && jaJ) chain = chain.then(function () { return SR._translate(jaJ, 'ja2zh', baseUrl, apiKey, model).then(function (z) { if (z) zhC = z; }); });
+  if (!jaJ && zhC) chain = chain.then(function () { return SR._translate(zhC, 'zh2ja', baseUrl, apiKey, model).then(function (j) { if (j) jaJ = j; }); });
+  return chain.then(function () {
+    return {
+      ja: jaJ || r.ja || r.zh || '',
+      zh: zhC || jaJ || r.zh || r.ja || '',
+      emotion: r.emotion || SR.emotionRouter.weighted(personality)
+    };
+  });
 };
 
 SR.adapters.mock = {
@@ -242,14 +268,9 @@ SR.adapters.stepfun = {
       .then(function (raw) {
         if (!raw || !raw.trim()) throw new Error('空响应');
         var r = SR._parseBilingual(raw);
-        var build = function (zh) {
-          return { ja: r.ja, zh: zh, emotion: r.emotion || SR.emotionRouter.weighted(personality), source: 'real' };
-        };
-        if (SR._isChinese(r.zh)) return build(r.zh);
-        // 模型漏给/错给中文（中文字幕变日文）：补一次轻量翻译兜底
-        return SR._translateJaToZh(r.ja, SR.adapters.stepfun.baseUrl, settings.apiKey,
-          (settings && settings.chatModel) || SR.adapters.stepfun.chatModel)
-          .then(function (zh) { return build(zh || r.ja); });
+        return SR._fixBilingual(r, SR.adapters.stepfun.baseUrl,
+          (settings && settings.chatModel) || SR.adapters.stepfun.chatModel, settings.apiKey, personality)
+          .then(function (f) { f.source = 'real'; return f; });
       });
   }
 };
@@ -275,13 +296,9 @@ SR.adapters.aiping = {
       .then(function (raw) {
         if (!raw || !raw.trim()) throw new Error('空响应');
         var r = SR._parseBilingual(raw);
-        var build = function (zh) {
-          return { ja: r.ja, zh: zh, emotion: r.emotion || SR.emotionRouter.weighted(personality), source: 'real' };
-        };
-        if (SR._isChinese(r.zh)) return build(r.zh);
-        return SR._translateJaToZh(r.ja, SR.adapters.aiping.baseUrl, settings.apiKey,
-          (settings && settings.chatModel) || SR.adapters.aiping.chatModel)
-          .then(function (zh) { return build(zh || r.ja); });
+        return SR._fixBilingual(r, SR.adapters.aiping.baseUrl,
+          (settings && settings.chatModel) || SR.adapters.aiping.chatModel, settings.apiKey, personality)
+          .then(function (f) { f.source = 'real'; return f; });
       });
   }
 };

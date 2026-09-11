@@ -120,7 +120,8 @@ SR.main = (function () {
       },
       onJaReady: function (jaText) {
         var s = SR.store.get().settings;
-        if (s.ttsEngine === 'remote' && s.apiKey) startSpeak(jaText, null, null);
+        // 仅当 JA 行确为日语才提前合成，避免模型把中文放进 JA 行时提前播中文
+        if (s.ttsEngine === 'remote' && s.apiKey && SR._isJapanese(jaText)) startSpeak(jaText, null, null);
       }
     };
 
