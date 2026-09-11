@@ -120,7 +120,7 @@ SR.main = (function () {
       onPartial: function (full) {
         var pp = SR._parseBilingualPartial(full);
         if (pp.ja && SR._isJapanese(pp.ja)) {
-          SR.ui.setSubtitleJa(SR._stripCues(pp.ja));   // 字幕不显演技指示，只显台词
+          SR.ui.setSubtitleJa(pp.ja);   // （）演技指示由字幕层统一剔除
           if (zhPreview) { zhPreview = false; SR.ui.setSubtitleZh(''); }  // 收回开头纯汉字被误预览进中文槽的内容
         }
         if (pp.zh) { zhPreview = false; SR.ui.setSubtitleZh(pp.zh); }
@@ -143,10 +143,10 @@ SR.main = (function () {
       SR.ui.setImage(state.personalityId, reply.emotion);
       if (reply.source === 'real') {
         SR.ui.setSubtitleZh(reply.zh);   // 流式已渐进显示，这里定稿校正
-        SR.ui.setSubtitleJa(SR._stripCues(reply.ja));
+        SR.ui.setSubtitleJa(reply.ja);
       } else {
         SR.ui.typeSubtitle(reply.zh);    // 离线 Mock：自适应快速打字
-        SR.ui.setSubtitleJa(SR._stripCues(reply.ja));
+        SR.ui.setSubtitleJa(reply.ja);
       }
 
       // 记录历史

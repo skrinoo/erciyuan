@@ -82,7 +82,7 @@ SR.ui = (function () {
   /* ---- 打字机字幕（离线/问候用；自适应速度，总时长封顶，避免“回复已到还在慢慢打字”） ---- */
   function typeSubtitle(text) {
     if (typeTimer) { clearInterval(typeTimer); typeTimer = null; }
-    text = text || '';
+    text = stripCues(text);
     el.subtitleZh.textContent = '';
     var n = text.length;
     if (!n) return;
@@ -100,7 +100,12 @@ SR.ui = (function () {
   /* 立即设置中文字幕（真模型流式渐进显示 / 定稿用），并打断进行中的打字动画 */
   function setSubtitleZh(t) {
     if (typeTimer) { clearInterval(typeTimer); typeTimer = null; }
-    el.subtitleZh.textContent = t || '';
+    el.subtitleZh.textContent = stripCues(t);
+  }
+
+  /* 字幕只显示台词：剔除（）内的声の演技指示（那是给 TTS 看的，模型有时会把它也译进中文） */
+  function stripCues(t) {
+    return SR._stripCues ? SR._stripCues(t) : String(t == null ? '' : t);
   }
 
   /* ---- 性格切换按钮 ---- */
@@ -129,7 +134,7 @@ SR.ui = (function () {
       var p = SR.getPersonality(h.personalityId);
       li.innerHTML =
         '<div class="h-worry">我：' + escapeHtml(h.worry) + '</div>' +
-        '<div class="h-reply">' + p.nameZh + '：' + escapeHtml(h.zh) + '</div>' +
+        '<div class="h-reply">' + p.nameZh + '：' + escapeHtml(stripCues(h.zh)) + '</div>' +
         '<div class="h-meta">' + (SR.CONFIG.EMOTION_LABELS[h.emotion] || h.emotion) + '</div>';
       el.historyList.appendChild(li);
     });
@@ -229,6 +234,6 @@ SR.ui = (function () {
     renderStatus: renderStatus,
     toast: toast,
     render: render,
-    setSubtitleJa: function (t) { el.subtitleJa.textContent = t || ''; }
+    setSubtitleJa: function (t) { el.subtitleJa.textContent = stripCues(t); }
   };
 })();
