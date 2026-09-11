@@ -79,15 +79,28 @@ SR.ui = (function () {
     }, 1500);
   }
 
-  /* ---- 打字机字幕 ---- */
+  /* ---- 打字机字幕（离线/问候用；自适应速度，总时长封顶，避免“回复已到还在慢慢打字”） ---- */
   function typeSubtitle(text) {
-    if (typeTimer) clearInterval(typeTimer);
+    if (typeTimer) { clearInterval(typeTimer); typeTimer = null; }
+    text = text || '';
     el.subtitleZh.textContent = '';
+    var n = text.length;
+    if (!n) return;
+    var per = n > 28 ? 2 : 1;                                   // 长句每次多打几个字
+    var steps = Math.ceil(n / per);
+    var ms = Math.max(12, Math.min(26, Math.round(640 / steps))); // 总时长≈640ms 封顶
     var i = 0;
     typeTimer = setInterval(function () {
-      el.subtitleZh.textContent = text.slice(0, ++i);
-      if (i >= text.length) clearInterval(typeTimer);
-    }, 28);
+      i = Math.min(n, i + per);
+      el.subtitleZh.textContent = text.slice(0, i);
+      if (i >= n) { clearInterval(typeTimer); typeTimer = null; }
+    }, ms);
+  }
+
+  /* 立即设置中文字幕（真模型流式渐进显示 / 定稿用），并打断进行中的打字动画 */
+  function setSubtitleZh(t) {
+    if (typeTimer) { clearInterval(typeTimer); typeTimer = null; }
+    el.subtitleZh.textContent = t || '';
   }
 
   /* ---- 性格切换按钮 ---- */
@@ -210,6 +223,7 @@ SR.ui = (function () {
     setImage: setImage,
     preloadImages: preloadImages,
     typeSubtitle: typeSubtitle,
+    setSubtitleZh: setSubtitleZh,
     renderHistory: renderHistory,
     populateVoices: populateVoices,
     renderStatus: renderStatus,

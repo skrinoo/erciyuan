@@ -99,11 +99,39 @@ SR.main = (function () {
     SR.speech.cancel();
     SR.store.set({ isThinking: true, isSpeaking: false }, { persist: false });
 
-    SR.getReply(worry, personality, state.settings).then(function (reply) {
+    var wantSpeak = state.settings.autoSpeak;
+    var ttsStarted = false;
+    var firstToken = false;
+    var startSpeak = function (jaText, zhText, audioSrc) {
+      if (ttsStarted || !wantSpeak || !jaText) return;
+      ttsStarted = true;
+      speakLine(jaText, zhText || jaText, personality, audioSrc || null);
+    };
+
+    // 流式回调：边到边显示字幕；JA 行一完成就并行去合成语音（不等整段回复）
+    var hooks = {
+      onPartial: function (full) {
+        var pp = SR._parseBilingualPartial(full);
+        if (pp.ja) SR.ui.setSubtitleJa(pp.ja);
+        if (pp.zh) SR.ui.setSubtitleZh(pp.zh);
+        if (!firstToken) { firstToken = true; SR.store.set({ isThinking: false }, { persist: false }); }
+      },
+      onJaReady: function (jaText) {
+        var s = SR.store.get().settings;
+        if (s.ttsEngine === 'remote' && s.apiKey) startSpeak(jaText, null, null);
+      }
+    };
+
+    SR.getReply(worry, personality, state.settings, hooks).then(function (reply) {
       SR.store.set({ isThinking: false, emotion: reply.emotion, replySource: reply.source || 'mock' }, { persist: false });
       SR.ui.setImage(state.personalityId, reply.emotion);
-      SR.ui.typeSubtitle(reply.zh);
-      SR.ui.setSubtitleJa(reply.ja);
+      if (reply.source === 'real') {
+        SR.ui.setSubtitleZh(reply.zh);   // 流式已渐进显示，这里定稿校正
+        SR.ui.setSubtitleJa(reply.ja);
+      } else {
+        SR.ui.typeSubtitle(reply.zh);    // 离线 Mock：自适应快速打字
+        SR.ui.setSubtitleJa(reply.ja);
+      }
 
       // 记录历史
       var hist = SR.store.get().history.slice();
@@ -114,13 +142,11 @@ SR.main = (function () {
       SR.store.set({ history: hist });
       SR.ui.renderHistory(SR.store.get());
 
-      // 自动播语音（优先预生成女声音频）
-      if (SR.store.get().settings.autoSpeak) {
-        var replyAudio = reply.audioKey
-          ? ('assets/audio/' + state.personalityId + '/' + reply.audioKey + '.mp3')
-          : null;
-        speakLine(reply.ja, reply.zh, personality, replyAudio);
-      }
+      // 语音：若未提前触发（Mock / Web Speech / 预生成音频 / 流式回退），现在触发
+      var replyAudio = reply.audioKey
+        ? ('assets/audio/' + state.personalityId + '/' + reply.audioKey + '.mp3')
+        : null;
+      startSpeak(reply.ja, reply.zh, replyAudio);
     }).catch(function (err) {
       console.error(err);
       SR.store.set({ isThinking: false }, { persist: false });
