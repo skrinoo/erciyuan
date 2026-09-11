@@ -5,6 +5,7 @@ SR.ui = (function () {
   var el = {};
   var layers = { a: null, b: null, front: 'a' }; // 双层立绘交叉淡入
   var typeTimer = null;
+  var historyFilter = 'all';   // 历史面板的角色筛选：'all' 或 personalityId
 
   function cache() {
     el.app = document.getElementById('app');
@@ -36,6 +37,12 @@ SR.ui = (function () {
     el.outRate = document.getElementById('out-rate');
     el.outPitch = document.getElementById('out-pitch');
     el.connStatus = document.getElementById('conn-status');
+    el.setSessionOnly = document.getElementById('set-session-only');
+    el.diagBox = document.getElementById('diag-box');
+    el.historyFilter = document.getElementById('history-filter');
+    el.btnExport = document.getElementById('btn-export-history');
+    el.unmute = document.getElementById('btn-unmute');
+    el.btnResetStats = document.getElementById('btn-reset-stats');
     layers.a = el.layerA; layers.b = el.layerB;
   }
 
@@ -121,23 +128,77 @@ SR.ui = (function () {
     });
   }
 
-  /* ---- 历史列表 ---- */
+  /* ---- 历史列表（时间戳 / 角色筛选 / 点条目重播语音） ---- */
+  function fmtTime(ts) {
+    if (!ts) return '';
+    var d = new Date(ts), now = new Date();
+    var hm = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+    if (d.toDateString() === now.toDateString()) return '今天 ' + hm;
+    if (d.toDateString() === new Date(now.getTime() - 86400000).toDateString()) return '昨天 ' + hm;
+    return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm;
+  }
+
   function renderHistory(state) {
     el.historyList.innerHTML = '';
-    var items = state.history.slice().reverse();
+    var all = state.history || [];
+    var items = all.slice().reverse();
+    if (historyFilter !== 'all') {
+      items = items.filter(function (h) { return h.personalityId === historyFilter; });
+    }
     if (!items.length) {
-      el.historyList.innerHTML = '<li style="color:var(--text-dim)">暂无对话</li>';
+      el.historyList.innerHTML = '<li style="color:var(--text-dim)">' + (all.length ? '这个角色还没有对话' : '暂无对话') + '</li>';
       return;
     }
     items.forEach(function (h) {
       var li = document.createElement('li');
       var p = SR.getPersonality(h.personalityId);
+      var idx = all.indexOf(h);   // 原数组下标，重播时取同一条的 ja/zh
       li.innerHTML =
         '<div class="h-worry">我：' + escapeHtml(h.worry) + '</div>' +
-        '<div class="h-reply">' + p.nameZh + '：' + escapeHtml(stripCues(h.zh)) + '</div>' +
-        '<div class="h-meta">' + (SR.CONFIG.EMOTION_LABELS[h.emotion] || h.emotion) + '</div>';
+        '<div class="h-reply">' + escapeHtml(p.nameZh) + '：' + escapeHtml(stripCues(h.zh)) + '</div>' +
+        '<div class="h-meta">' +
+          '<span class="h-emo">' + escapeHtml(SR.CONFIG.EMOTION_LABELS[h.emotion] || h.emotion || '') + '</span>' +
+          '<span class="h-time">' + fmtTime(h.ts) + '</span>' +
+          '<button type="button" class="h-replay" title="重播这条的语音">🔊</button>' +
+        '</div>';
+      var btn = li.querySelector('.h-replay');
+      if (btn) btn.onclick = function () { if (SR.main && SR.main.replayLine) SR.main.replayLine(idx); };
       el.historyList.appendChild(li);
     });
+  }
+
+  function setHistoryFilter(id) {
+    historyFilter = id || 'all';
+    renderHistory(SR.store.get());
+  }
+
+  /* 导出全部对话为 JSON（纯本地生成 + 下载，不经过任何服务器） */
+  function exportHistory() {
+    var h = SR.store.get().history || [];
+    if (!h.length) { toast('还没有对话可导出', 'info'); return; }
+    var data = h.map(function (x) {
+      var p = SR.getPersonality(x.personalityId);
+      return {
+        time: new Date(x.ts || 0).toLocaleString(),
+        character: p.nameZh,
+        worry: x.worry,
+        ja: stripCues(x.ja),
+        zh: stripCues(x.zh),
+        emotion: x.emotion
+      };
+    });
+    try {
+      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'kokoro-history-' + new Date().toISOString().slice(0, 10) + '.json';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); if (a.parentNode) a.parentNode.removeChild(a); }, 500);
+      toast('已导出 ' + data.length + ' 条对话', 'ok');
+    } catch (e) {
+      toast('导出失败：' + ((e && e.message) || e), 'error');
+    }
   }
 
   function escapeHtml(s) {
@@ -200,11 +261,34 @@ SR.ui = (function () {
     }, 3400);
   }
 
+  /* ---- 诊断区（生产可观测）：SR.stats 的计数实时显示在设置面板底部。
+     以前“到底回退了多少次、首响多久”只能靠猜，现在用户与开发者都能直接看到 ---- */
+  function renderDiag(s) {
+    if (!el.diagBox || !s) return;
+    var cell = function (label, v) {
+      return '<span class="diag-item"><b>' + escapeHtml(String(v)) + '</b>' + label + '</span>';
+    };
+    el.diagBox.innerHTML =
+      '<div class="diag-grid">' +
+        cell('真模型成功', s.realOk || 0) + cell('回退 Mock', s.fallback || 0) +
+        cell('空响应', s.emptyResp || 0) + cell('审核 451', s.err451 || 0) +
+        cell('TTS 失败', s.ttsFail || 0) + cell('JA 行违约', s.jaViolation || 0) +
+        cell('重写救回', s.jaRewrite || 0) + cell('翻译补齐', s.translateFix || 0) +
+        cell('剥离越界 cue', s.cueStripped || 0) + cell('播放被拦', s.autoplayBlocked || 0) +
+        cell('首响均值', (s.ttftMs || 0) + 'ms') + cell('首响最近', (s.ttftLast || 0) + 'ms') +
+      '</div>' +
+      (s.lastErr ? '<div class="diag-err">最近错误：' + escapeHtml(s.lastErr) + '</div>' : '');
+  }
+
+  /* ---- 声音首触引导：浏览器自动播放策略拦下音频时，给一个明确的开关而不是静默失败 ---- */
+  function showUnmute() { if (el.unmute) el.unmute.classList.remove('hidden'); }
+  function hideUnmute() { if (el.unmute) el.unmute.classList.add('hidden'); }
+
   /* ---- 主渲染（订阅 store） ---- */
   function render(state) {
     el.app.dataset.personality = state.personalityId;
     var p = SR.getPersonality(state.personalityId);
-    el.emotionBadge.textContent = (SR.CONFIG.EMOTION_LABELS[state.emotion] || state.emotion) + ' · ' + state.emotion;
+    el.emotionBadge.textContent = SR.CONFIG.EMOTION_LABELS[state.emotion] || state.emotion;   // 不再把内部枚举泄漏给用户
     if (el.modeBadge) {
       if (state.replySource === 'real') {
         var bn = state.settings.adapter === 'aiping' ? 'aiping' : 'StepFun';
@@ -230,6 +314,11 @@ SR.ui = (function () {
     typeSubtitle: typeSubtitle,
     setSubtitleZh: setSubtitleZh,
     renderHistory: renderHistory,
+    setHistoryFilter: setHistoryFilter,
+    exportHistory: exportHistory,
+    renderDiag: renderDiag,
+    showUnmute: showUnmute,
+    hideUnmute: hideUnmute,
     populateVoices: populateVoices,
     renderStatus: renderStatus,
     toast: toast,

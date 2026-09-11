@@ -92,6 +92,33 @@
   z-index: 2;
 }
 
+/* 声音首触引导：浏览器自动播放策略拦下音频时出现在舞台顶部中央
+   （左上情绪徽章、右上模式徽章、底部思考指示器均已占用，顶部中央是唯一空位） */
+.unmute-btn {
+  position: absolute;
+  top: 10px; left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  letter-spacing: .5px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 16px var(--primary-soft);
+  animation: unmute-pulse 1.8s infinite ease-in-out;
+  z-index: 3;
+}
+.unmute-btn:hover { filter: brightness(1.12); animation: none; }
+@keyframes unmute-pulse {
+  0%, 100% { box-shadow: 0 4px 16px var(--primary-soft); }
+  50% { box-shadow: 0 4px 26px var(--accent); }
+}
+
 /* 思考中指示器 */
 .thinking {
   position: absolute;

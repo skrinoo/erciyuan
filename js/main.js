@@ -18,7 +18,9 @@ SR.main = (function () {
 
     bindEvents();
     syncSettingsUI();
+    buildHistoryFilter();
     SR.ui.renderHistory(state);
+    if (SR.stats) SR.ui.renderDiag(SR.stats.get());
     checkBuildFreshness();
   }
 
@@ -61,47 +63,104 @@ SR.main = (function () {
     applyPersonality(id, false);
   }
 
-  /* ---- 应用性格：换立绘 + 说问候语 ---- */
+  /* ---- 应用性格：换立绘 + 说问候语 ----
+     旧实现先打 tagline 再立刻打 greeting，前一个打字动画被同 tick 取消，tagline 永远看不到（死代码）。
+     现在二选一：开自动语音→直接问候语；关自动语音→停留角色标语。 */
   function applyPersonality(id, isInit) {
     var p = SR.getPersonality(id);
     SR.ui.setImage(id, 'normal');
-    SR.store.set({ emotion: 'normal', subtitleZh: p.tagline, subtitleJa: '', replySource: '' }, { persist: false });
-    SR.ui.typeSubtitle(p.tagline);
     SR.ui.setSubtitleJa('');
-    // 开场白语音（优先预生成音频）
     if (SR.store.get().settings.autoSpeak) {
-      var greetingSrc = 'assets/audio/' + id + '/greeting.mp3';
-      speakLine(p.greetingJa, p.greetingZh, p, greetingSrc, 'normal');
+      SR.store.set({ emotion: 'normal', subtitleZh: p.greetingZh, subtitleJa: p.greetingJa, replySource: '' }, { persist: false });
       SR.ui.typeSubtitle(p.greetingZh);
       SR.ui.setSubtitleJa(p.greetingJa);
+      // 开场白语音（优先预生成音频）
+      speakLine(p.greetingJa, p.greetingZh, p, 'assets/audio/' + id + '/greeting.mp3', 'normal');
+    } else {
+      SR.store.set({ emotion: 'normal', subtitleZh: p.tagline, subtitleJa: '', replySource: '' }, { persist: false });
+      SR.ui.typeSubtitle(p.tagline);
     }
+  }
+
+  var lastLine = null;   // 最近一条要播的台词：自动播放被拦后，用户点「开启声音」用它重播
+
+  /* 自动播放策略拦截检测：只有在用户从未与页面交互过时才算“被拦”，
+     此时显示「🔊 开启声音」；已交互过还失败就是别的原因（走原有 toast）。
+     旧行为是静默失败，用户只当“没声音”，README 里只能写一句“请点地址栏允许”。 */
+  function notePlayFailure(ok) {
+    if (ok || !lastLine) return;
+    var ua = navigator.userActivation;
+    if (ua && ua.hasBeenActive) return;
+    var s = SR.store.get().settings;
+    var remote = (s.ttsEngine === 'remote' && s.apiKey);
+    // 完全没有任何可播的东西时，给按钮也没用
+    if (!remote && !lastLine.audioSrc && !SR.speech.supported()) return;
+    if (SR.stats) SR.stats.hit('autoplayBlocked');
+    SR.ui.showUnmute();
+  }
+
+  /* 用户点「开启声音」：此时已有用户手势，重播最近一条台词 */
+  function enableSound() {
+    SR.ui.hideUnmute();
+    if (!lastLine) return;
+    SR.speech.cancel();
+    speakLine(lastLine.ja, lastLine.zh, lastLine.personality, lastLine.audioSrc, lastLine.emotion);
+  }
+
+  /* 历史面板重播：按下标取该条台词重新播放（有预生成音频就用，否则走当前语音引擎） */
+  function replayLine(idx) {
+    var h = (SR.store.get().history || [])[idx];
+    if (!h) return;
+    SR.speech.cancel();
+    SR.ui.hideUnmute();
+    SR.store.set({ emotion: h.emotion, replySource: '' }, { persist: false });
+    SR.ui.setImage(h.personalityId, h.emotion);
+    SR.ui.setSubtitleZh(h.zh);
+    SR.ui.setSubtitleJa(h.ja);
+    var src = h.audioKey ? ('assets/audio/' + h.personalityId + '/' + h.audioKey + '.mp3') : null;
+    speakLine(h.ja, h.zh, SR.getPersonality(h.personalityId), src, h.emotion);
   }
 
   /* ---- 语音路由：远端 TTS -> 预生成音频 -> Web Speech(无日语音色时念中文字幕) ----
      emotion 会转成情绪专属的全局语境 instruction，让同一角色根据情绪“演”而不只是“念” */
   function speakLine(textJa, textZh, personality, audioSrc, emotion) {
     var s = SR.store.get().settings;
-    var onStart = function () { SR.store.set({ isSpeaking: true }, { persist: false }); };
+    lastLine = { ja: textJa, zh: textZh, personality: personality, audioSrc: audioSrc || null, emotion: emotion };
+    var onStart = function () { SR.ui.hideUnmute(); SR.store.set({ isSpeaking: true }, { persist: false }); };
     var onEnd = function () { SR.store.set({ isSpeaking: false }, { persist: false }); };
 
     // 1) 远端 TTS（需 Key）：原文含（）演技指示，交给 stepaudio-2.5-tts 表演
-    if (s.ttsEngine === 'remote' && s.apiKey) {
+    // 但日语台词为空时（JA 行违约且重写/翻译均失败）无内容可合成，直接走 Web Speech 念中文字幕，
+    // 否则白跑一次 API 还会弹“远端 TTS 失败”的误导提示
+    if (s.ttsEngine === 'remote' && s.apiKey && SR._stripCues(textJa)) {
       return SR.remoteTTS.synthesize(textJa, personality, s, emotion).then(function (objUrl) {
         return SR.audioPlayer.play(objUrl, { onstart: onStart, onend: onEnd });
+      }).then(function (played) {
+        notePlayFailure(played);
+        return played;
       }).catch(function (err) {
         if (SR.ui && SR.ui.toast) SR.ui.toast('远端 TTS 失败（' + (err && err.message ? err.message : '网络/Key') + '），已回退浏览器语音', 'warn');
-        return webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd);
+        return webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd).then(function (ok2) {
+          notePlayFailure(ok2);
+          return ok2;
+        });
       });
     }
     // 2) 预生成音频：直接播放（缺文件/播放失败才兜底 Web Speech），不再用易超时的 probe 预探测
     if (audioSrc) {
       return SR.audioPlayer.play(audioSrc, { onstart: onStart, onend: onEnd }).then(function (played) {
         if (played) return true;
-        return webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd);
+        return webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd).then(function (ok2) {
+          notePlayFailure(ok2);
+          return ok2;
+        });
       });
     }
     // 3) Web Speech
-    return webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd);
+    return webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd).then(function (ok3) {
+      notePlayFailure(ok3);
+      return ok3;
+    });
   }
 
   function webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd) {
@@ -181,24 +240,56 @@ SR.main = (function () {
         SR.ui.setSubtitleJa(reply.ja);
       }
 
-      // 记录历史
-      var hist = SR.store.get().history.slice();
-      hist.push({
-        worry: worry, ja: reply.ja, zh: reply.zh,
-        emotion: reply.emotion, personalityId: state.personalityId, ts: Date.now()
-      });
-      SR.store.set({ history: hist });
-      SR.ui.renderHistory(SR.store.get());
-
       // 语音：若未提前触发（Mock / Web Speech / 预生成音频 / 流式回退），现在触发
       var replyAudio = reply.audioKey
         ? ('assets/audio/' + state.personalityId + '/' + reply.audioKey + '.mp3')
         : null;
+
+      // 记录历史（audioKey 一并存下，历史面板重播时能用到同一条预生成女声）
+      var hist = SR.store.get().history.slice();
+      hist.push({
+        worry: worry, ja: reply.ja, zh: reply.zh,
+        emotion: reply.emotion, personalityId: state.personalityId,
+        audioKey: reply.audioKey || null, ts: Date.now()
+      });
+      SR.store.set({ history: hist });
+      SR.ui.renderHistory(SR.store.get());
+      maybeBuildProfile(personality, hist);
+
       startSpeak(reply.ja, reply.zh, replyAudio, reply.emotion);
     }).catch(function (err) {
       console.error(err);
       SR.store.set({ isThinking: false }, { persist: false });
     });
+  }
+
+  /* ---- 长期记忆：每满 PROFILE_EVERY 轮把该角色的对话压缩成「关于你的备忘」。
+     异步、失败静默、不阻塞当前回复；只带最近 3 轮的记忆块会让“聊久了也不记得你”，
+     备忘存 localStorage，下次开页依旧认得你 ---- */
+  function maybeBuildProfile(personality, hist) {
+    var s = SR.store.get().settings;
+    if (!s.apiKey || s.adapter === 'mock') return;   // 离线 Mock 无 Key，不生成
+    var mine = 0, i;
+    for (i = 0; i < hist.length; i++) if (hist[i].personalityId === personality.id) mine++;
+    if (mine < SR.PROFILE_MIN || mine % SR.PROFILE_EVERY !== 0) return;
+    SR.buildProfile(personality, s, hist).then(function (text) {
+      if (!text) return;
+      var profiles = Object.assign({}, SR.store.get().profiles || {});
+      profiles[personality.id] = { text: text, ts: Date.now(), turns: mine };
+      SR.store.set({ profiles: profiles });
+      if (SR.ui && SR.ui.toast) SR.ui.toast(personality.nameZh + ' 记住了更多关于你的事', 'ok');
+    }).catch(function () { /* 备忘失败不影响对话 */ });
+  }
+
+  /* 历史面板的角色筛选下拉（按 SR.PERSONALITIES 自动生成） */
+  function buildHistoryFilter() {
+    var el = SR.ui.el();
+    if (!el.historyFilter) return;
+    var html = '<option value="all">全部角色</option>';
+    SR.PERSONALITIES.forEach(function (p) {
+      html += '<option value="' + p.id + '">' + p.nameZh + '</option>';
+    });
+    el.historyFilter.innerHTML = html;
   }
 
   /* ---- 设置 UI 同步 ---- */
@@ -212,6 +303,7 @@ SR.main = (function () {
     el.setRate.value = s.rate;
     el.setPitch.value = s.pitch;
     el.setAutoSpeak.checked = !!s.autoSpeak;
+    if (el.setSessionOnly) el.setSessionOnly.checked = !!s.sessionOnly;
     el.outRate.textContent = Number(s.rate).toFixed(2);
     el.outPitch.textContent = Number(s.pitch).toFixed(2);
   }
@@ -281,9 +373,37 @@ SR.main = (function () {
     };
     el.setVoice.onchange = function () { SR.store.set({ settings: Object.assign({}, SR.store.get().settings, { voiceURI: el.setVoice.value }) }); };
     el.setAutoSpeak.onchange = function () { SR.store.set({ settings: Object.assign({}, SR.store.get().settings, { autoSpeak: el.setAutoSpeak.checked }) }); };
+
+    // “仅本次会话”：Key 不写入 localStorage（明文存储，公用电脑上会被下一个人读到）
+    if (el.setSessionOnly) el.setSessionOnly.onchange = function () {
+      SR.store.set({ settings: Object.assign({}, SR.store.get().settings, { sessionOnly: el.setSessionOnly.checked }) });
+      SR.ui.toast(el.setSessionOnly.checked
+        ? 'API Key 仅本次会话保留，刷新/重开后需重填'
+        : 'API Key 会保存在本机浏览器', 'info');
+    };
+
+    // 历史面板：角色筛选 / 导出
+    if (el.historyFilter) el.historyFilter.onchange = function () { SR.ui.setHistoryFilter(el.historyFilter.value); };
+    if (el.btnExport) el.btnExport.onclick = function () { SR.ui.exportHistory(); };
+
+    // 声音首触：自动播放被拦时出现，点击即有用户手势，可正常播放
+    if (el.unmute) el.unmute.onclick = function () { enableSound(); };
+
+    // 诊断清零：重新计数（reset 内部会 draw，无需再手动 renderDiag）
+    if (el.btnResetStats) el.btnResetStats.onclick = function () {
+      if (!SR.stats) return;
+      SR.stats.reset();
+      SR.ui.toast('诊断计数已清零', 'info');
+    };
   }
 
-  return { init: init, switchPersonality: switchPersonality, submitWorry: submitWorry };
+  return {
+    init: init,
+    switchPersonality: switchPersonality,
+    submitWorry: submitWorry,
+    replayLine: replayLine,
+    enableSound: enableSound
+  };
 })();
 
 document.addEventListener('DOMContentLoaded', SR.main.init);

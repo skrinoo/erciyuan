@@ -31,7 +31,13 @@ SR._OUTPUT_RULE =
   '例：\n' +
   '[emotion:angry]\n' +
   'JA: （舌打ち）べ、別に心配じゃないからね！\n' +
-  'ZH: 哼，才、才不是担心你呢！';
+  'ZH: 哼，才、才不是担心你呢！\n' +
+  '\n✗悪い例（絶対にやってはいけない失敗）：\n' +
+  'JA: （指尖攥紧衣角）不许说这种傻话…… ← JA 行が中国語になっている。JA は必ず日本語で書く。\n' +
+  'ZH: （指尖攥紧衣角）不许说这种傻话…… ← ZH が JA と同じ文のコピー。ZH は JA の中国語訳でなければならない。\n' +
+  '注意：感情が強い・重い話題ほど、JA 行をうっかり中国語で書いてしまう失敗が起きやすい。' +
+  '書き終わったら「JA 行にひらがな／カタカナが入っているか」を必ず自分で確認すること。入っていなければ書き直す。\n' +
+  '演技指示の括弧は JA 行にだけ書くこと。ZH 行には括弧を書かず、セリフだけを訳すこと。';
 
 /* 回复质量规则：追加在角色 prompt 后，专治“公式化”——
    具体回应 / 句式变化 / 反应多样 / 记忆体现（格式契约 _OUTPUT_RULE 仍放最末尾保合规） */
@@ -81,6 +87,32 @@ SR._stripCues = function (t) {
     .replace(/\([^()]*\)/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
+};
+
+/* cue 白名单强制：只保留角色 cues 里列出的括号指示，其余一律剥掉。
+   实测模型会自创白名单外的指示（如「（指尖下意识攥紧他的衣角）」中文动作描写、
+   「（少し背中をさすりながら）」身体接触描写）——前者泄漏成字幕噪音，后者随时触发 TTS 审核 451。
+   匹配用双向包含，允许模型写「（少し小声で）」这类带修饰的变体。 */
+SR._normalizeCues = function (t, personality) {
+  var raw = String(t == null ? '' : t);
+  var allow = (personality && personality.tts && personality.tts.cues) || [];
+  var inner = function (s) { return s.replace(/[（）()]/g, '').replace(/\s+/g, '').trim(); };
+  var allowInner = [];
+  for (var a = 0; a < allow.length; a++) allowInner.push(inner(allow[a]));
+  var bad = [];
+  var out = raw.replace(/（[^（）]*）|\([^()]*\)/g, function (m) {
+    var mi = inner(m);
+    for (var i = 0; i < allowInner.length; i++) {
+      if (mi && allowInner[i] && (mi.indexOf(allowInner[i]) >= 0 || allowInner[i].indexOf(mi) >= 0)) return m;
+    }
+    bad.push(m);
+    return '';
+  }).replace(/\s{2,}/g, ' ').trim();
+  if (bad.length) {
+    console.warn('[cue] 剥离白名单外的演技指示：' + bad.join(' '));
+    if (SR.stats) SR.stats.hit('cueStripped', bad.length);
+  }
+  return out;
 };
 
 /* 合成全局语境 instruction：角色基调 + 当前情绪，上限 200 字符（stepaudio-2.5-tts 硬限制） */
@@ -208,12 +240,14 @@ SR._chatStream = function (url, apiKey, body, hooks) {
     var reader = r.body.getReader();
     var dec = new TextDecoder('utf-8');
     var full = '', reasonBuf = '', rawAll = '', sseBuf = '', jaFired = false;
+    var t0 = Date.now(), ttftDone = false;   // 首 token 耗时：思考型模型的“空等”到底多久，靠这个量化
     var eat = function (line) {
       line = line.replace(/\r$/, '').trim();
       if (!line || line === 'data: [DONE]' || line === '[DONE]') return;
       if (line.indexOf('data:') === 0) line = line.slice(5).trim();
       var d = SR._extractDelta(line);
       if (!d) { reasonBuf += SR._extractReasoning(line); return; }
+      if (!ttftDone) { ttftDone = true; if (SR.stats) SR.stats.time(Date.now() - t0); }
       full += d;
       if (hooks.onPartial) hooks.onPartial(full);
       if (!jaFired) {
@@ -264,7 +298,8 @@ SR._translate = function (text, dir, baseUrl, apiKey, model) {
       { role: 'user', content: text }
     ],
     temperature: 0.3,
-    max_tokens: 200
+    // 思考型模型的思考也吃 max_tokens：200 会被思考用尽而正文空（翻译静默失败 → 日文槽空白 + 无声）
+    max_tokens: 1024
   };
   return fetch(baseUrl + '/chat/completions', {
     method: 'POST',
@@ -289,22 +324,107 @@ SR._translateTwice = function (text, dir, baseUrl, apiKey, model) {
   });
 };
 
+/* JA 行被写成中文时的治根手段：不走“中→日翻译”（译者人设会丢掉角色口吻），
+   而是带着角色 systemPrompt 回灌，让模型只把这句重写成日语、保持人设与内容不变。
+   实测高情绪输入下模型违约率明显升高，这一步能把“日文槽空白 + 完全无声”救回来。 */
+SR._rewriteJa = function (zhLine, personality, baseUrl, apiKey, model) {
+  if (!zhLine) return Promise.resolve('');
+  var body = {
+    model: model,
+    messages: [
+      { role: 'system', content:
+        ((personality && personality.systemPrompt) ? personality.systemPrompt + '\n\n' : '') +
+        '【作業】下のセリフは、本来日本語で書くべき JA 行に誤って中国語で書かれたものです。' +
+        'キャラクターの口調・感情・言いたいことをそのまま保ち、自然な日本語のセリフに書き直してください。' +
+        '出力は日本語のセリフ1行だけ。説明・タグ・接頭辞（JA: など）・括弧の演技指示は一切付けないこと。' },
+      { role: 'user', content: String(zhLine).slice(0, 300) }
+    ],
+    temperature: 0.7,
+    max_tokens: 1024
+  };
+  return fetch(baseUrl + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (apiKey || '') },
+    body: JSON.stringify(body)
+  }).then(function (r) {
+    if (!r.ok) return '';
+    return r.text();
+  }).then(function (t) {
+    var c = SR._contentFromJson(t) || '';
+    c = String(c).replace(/\[emotion:[^\]]*\]?/gi, '').replace(/^\s*(JA|ZH|日本語)\s*[:：]\s*/i, '').trim();
+    var nl = c.search(/\r?\n/);
+    if (nl > 0) c = c.slice(0, nl).trim();
+    return SR._isJapanese(c) ? c : '';
+  }).catch(function () { return ''; });
+};
+
 /* 统一校正双语：保证 ja 是日语、zh 是中文；缺哪一边就用另一边翻译补齐。
    覆盖模型只给日语(漏中文)、只给中文(漏日语)、标签错配等所有情况。 */
 SR._fixBilingual = function (r, baseUrl, model, apiKey, personality) {
   var jaJ = SR._isJapanese(r.ja) ? r.ja : (SR._isJapanese(r.zh) ? r.zh : '');
   var zhC = SR._isChinese(r.zh) ? r.zh : (SR._isChinese(r.ja) ? r.ja : '');
+  var stat = function (k) { if (SR.stats) SR.stats.hit(k); };
   var chain = Promise.resolve();
-  if (!zhC && jaJ) chain = chain.then(function () { return SR._translateTwice(jaJ, 'ja2zh', baseUrl, apiKey, model).then(function (z) { if (z) zhC = z; }); });
-  if (!jaJ && zhC) chain = chain.then(function () { return SR._translateTwice(zhC, 'zh2ja', baseUrl, apiKey, model).then(function (j) { if (j) jaJ = j; }); });
+  if (!zhC && jaJ) chain = chain.then(function () {
+    return SR._translateTwice(jaJ, 'ja2zh', baseUrl, apiKey, model).then(function (z) { if (z) { zhC = z; stat('translateFix'); } });
+  });
+  if (!jaJ && zhC) {
+    stat('jaViolation');   // 模型把 JA 行写成了中文：先带人设重写，失败再退回翻译
+    chain = chain.then(function () {
+      return SR._rewriteJa(zhC, personality, baseUrl, apiKey, model).then(function (j) {
+        if (j) { jaJ = j; stat('jaRewrite'); return; }
+        return SR._translateTwice(zhC, 'zh2ja', baseUrl, apiKey, model).then(function (j2) { if (j2) { jaJ = j2; stat('translateFix'); } });
+      });
+    });
+  }
   return chain.then(function () {
     // 翻译彻底失败时宁可留空，也绝不把错误语言的文本填回字幕/语音（防“双中文/中文语音”复发）
+    // 两边都救不回来 → 抛错让上层回退 Mock，而不是给用户一片空白 + 无声
+    if (!jaJ && !zhC) throw new Error('双语输出均不可用（模型未遵守 JA/ZH 格式且补救失败）');
     return {
       ja: jaJ || '',
       zh: zhC || '',
       emotion: r.emotion || SR.emotionRouter.weighted(personality)
     };
   });
+};
+
+/* 预生成女声音频只有 c0~c7（每角色 8 条），语料表前 8 条与之按序对应；
+   超出部分没有音频文件，返回 null 让语音路由走 Web Speech，避免 404 噪音 */
+SR.MOCK_AUDIO_MAX = 8;
+/* 兜底句同理：磁盘上只有 f0~f2 三个音频，语料已扩到 6 条，第 4 条起必须走 Web Speech。
+   少了这个上限，扩语料就会静默换来 404 + 静音（audio.onerror 不提示，玩家只觉“没声音”） */
+SR.MOCK_FB_AUDIO_MAX = 3;
+
+/* Mock 匹配：按命中关键词打分（长词更具体、权重更高），取最高分，同分随机。
+   旧实现是“第一个命中的条目直接返回”，条目顺序决定结果，多意图输入必然答非所问
+   （例：「加班到十点，累死了」永远答“工作”，只因工作条目排在最前）。
+   同时记录上次命中，避免离线连玩时连续重复同一条。 */
+SR._mockLast = {};
+SR._matchMock = function (worry, pid) {
+  var corpus = SR.MOCK_CORPUS[pid] || [];
+  var w = String(worry || '');
+  var best = 0, tied = [], i, k;
+  for (i = 0; i < corpus.length; i++) {
+    var kws = corpus[i].keywords || [], score = 0;
+    for (k = 0; k < kws.length; k++) {
+      if (kws[k] && w.indexOf(kws[k]) >= 0) score += Math.max(1, Math.min(3, kws[k].length));
+    }
+    if (score > best) { best = score; tied = [i]; }
+    else if (score > 0 && score === best) tied.push(i);
+  }
+  if (best > 0) {
+    var idx = tied[Math.floor(Math.random() * tied.length)];
+    if (tied.length > 1 && ('c' + idx) === SR._mockLast[pid]) idx = tied[(tied.indexOf(idx) + 1) % tied.length];
+    SR._mockLast[pid] = 'c' + idx;
+    return { entry: corpus[idx], audioKey: idx < SR.MOCK_AUDIO_MAX ? ('c' + idx) : null };
+  }
+  var fb = SR.MOCK_FALLBACK[pid] || [];
+  if (!fb.length) return { entry: { emotion: 'normal', ja: '…うん。', zh: '……嗯。' }, audioKey: null };
+  var fi = Math.floor(Math.random() * fb.length);
+  if (fb.length > 1 && ('f' + fi) === SR._mockLast[pid]) fi = (fi + 1) % fb.length;
+  SR._mockLast[pid] = 'f' + fi;
+  return { entry: fb[fi], audioKey: fi < SR.MOCK_FB_AUDIO_MAX ? ('f' + fi) : null };
 };
 
 SR.adapters.mock = {
@@ -314,29 +434,12 @@ SR.adapters.mock = {
     return new Promise(function (resolve) {
       // 模拟思考延迟，增强"她在想"的感觉
       setTimeout(function () {
-        var corpus = SR.MOCK_CORPUS[personality.id] || [];
-        var hit = null, hitIndex = -1;
-        for (var i = 0; i < corpus.length; i++) {
-          var kws = corpus[i].keywords;
-          for (var k = 0; k < kws.length; k++) {
-            if (worry.indexOf(kws[k]) >= 0) { hit = corpus[i]; hitIndex = i; break; }
-          }
-          if (hit) break;
-        }
-        var audioKey = null;
-        if (hit) {
-          audioKey = 'c' + hitIndex; // 对应预生成女声音频 assets/audio/<pid>/c<i>.mp3
-        } else {
-          var fb = SR.MOCK_FALLBACK[personality.id] || [];
-          if (fb.length) {
-            var fi = Math.floor(Math.random() * fb.length);
-            hit = fb[fi];
-            audioKey = 'f' + fi; // 预生成兜底女声音频 assets/audio/<pid>/f<i>.mp3
-          } else {
-            hit = { emotion: 'normal', ja: '…うん。', zh: '……嗯。' };
-          }
-        }
-        resolve({ ja: hit.ja, zh: hit.zh, emotion: SR.emotionRouter.normalize(hit.emotion), audioKey: audioKey, source: 'mock' });
+        var m = SR._matchMock(worry, personality.id);
+        resolve({
+          ja: m.entry.ja, zh: m.entry.zh,
+          emotion: SR.emotionRouter.normalize(m.entry.emotion),
+          audioKey: m.audioKey, source: 'mock'
+        });
       }, 260 + Math.random() * 300);
     });
   }
@@ -352,7 +455,7 @@ SR.adapters.stepfun = {
     var body = {
       model: (settings && settings.chatModel) || SR.adapters.stepfun.chatModel,
       messages: [
-        { role: 'system', content: personality.systemPrompt + SR._STYLE_RULE + SR._memoryBlock(history, personality.id) + SR._cueRule(personality) + SR._OUTPUT_RULE },
+        { role: 'system', content: personality.systemPrompt + SR._STYLE_RULE + SR._memoryBlock(history, personality.id) + SR._profileBlock(personality.id) + SR._cueRule(personality) + SR._OUTPUT_RULE },
         { role: 'user', content: worry }
       ],
       temperature: 0.9,
@@ -364,6 +467,7 @@ SR.adapters.stepfun = {
         var raw = res && res.text;
         if (!raw || !raw.trim()) {
           // 正文空（思考用尽额度 / SSE 异常）：非流式重试一次
+          if (SR.stats) SR.stats.hit('emptyResp');
           var body2 = Object.assign({}, body, { stream: false });
           return SR._chatOnce(SR.adapters.stepfun.baseUrl + '/chat/completions', settings.apiKey, body2).then(function (t) {
             if (!t || !t.trim()) throw new Error('空响应' + (res.reasoning ? '（模型思考用尽 max_tokens，重试仍空）' : ''));
@@ -391,7 +495,7 @@ SR.adapters.aiping = {
     var body = {
       model: (settings && settings.chatModel) || SR.adapters.aiping.chatModel,
       messages: [
-        { role: 'system', content: personality.systemPrompt + SR._STYLE_RULE + SR._memoryBlock(history, personality.id) + SR._cueRule(personality) + SR._OUTPUT_RULE },
+        { role: 'system', content: personality.systemPrompt + SR._STYLE_RULE + SR._memoryBlock(history, personality.id) + SR._profileBlock(personality.id) + SR._cueRule(personality) + SR._OUTPUT_RULE },
         { role: 'user', content: worry }
       ],
       temperature: 0.9,
@@ -402,6 +506,7 @@ SR.adapters.aiping = {
       .then(function (res) {
         var raw = res && res.text;
         if (!raw || !raw.trim()) {
+          if (SR.stats) SR.stats.hit('emptyResp');
           var body2 = Object.assign({}, body, { stream: false });
           return SR._chatOnce(SR.adapters.aiping.baseUrl + '/chat/completions', settings.apiKey, body2).then(function (t) {
             if (!t || !t.trim()) throw new Error('空响应' + (res.reasoning ? '（模型思考用尽 max_tokens，重试仍空）' : ''));
@@ -449,11 +554,14 @@ SR.remoteTTS = {
         return URL.createObjectURL(blob);
       });
     };
-    return post(mkBody(text, SR.ttsInstruction(personality, emotion))).catch(function (err) {
+    // cue 白名单强制：模型自创的括号指示（中文动作描写 / 身体接触类）在这里被剥掉
+    var safeText = SR._normalizeCues(text, personality) || SR._stripCues(text);
+    return post(mkBody(safeText, SR.ttsInstruction(personality, emotion))).catch(function (err) {
       var msg = String((err && err.message) || '');
+      if (SR.stats) { SR.stats.noteErr(msg); SR.stats.hit(/451|censorship|blocked/i.test(msg) ? 'err451' : 'ttsFail'); }
       // 只对内容审核类失败降级重试；Key/网络/音色错误重试也是白花钱
       if (!/451|censorship|blocked|content/i.test(msg)) throw err;
-      var plain = SR._stripCues(text);
+      var plain = SR._stripCues(safeText);
       if (!plain) throw err;
       console.warn('[TTS] 审核拦截（' + msg + '），去演技指示与 instruction 重试：', plain);
       return post(mkBody(plain, ''));
@@ -465,9 +573,64 @@ SR.remoteTTS = {
 SR.getReply = function (worry, personality, settings, hooks, history) {
   var adapter = SR.adapters[settings.adapter] || SR.adapters.mock;
   if (adapter.id === 'mock') return SR.adapters.mock.generateReply(worry, personality);
-  return adapter.generateReply(worry, personality, settings, hooks, history).catch(function (err) {
+  return adapter.generateReply(worry, personality, settings, hooks, history).then(function (reply) {
+    if (SR.stats) SR.stats.hit('realOk');
+    return reply;
+  }).catch(function (err) {
     console.warn('[SR] 真模型调用失败，回退 Mock：', err);
+    if (SR.stats) { SR.stats.hit('fallback'); SR.stats.noteErr(err && err.message); }
     if (SR.ui && SR.ui.toast) SR.ui.toast('真模型对话失败（' + (err && err.message ? err.message : '网络/Key') + '），已回退离线 Mock', 'warn');
     return SR.adapters.mock.generateReply(worry, personality);
   });
+};
+
+/* ---------- 长期记忆：把该角色的历史压缩成「关于你的备忘」，跳会话注入 system ----------
+   只带最近 3 轮的记忆块会造成“切角色就归零、聊久了也不记得你”；备忘存 localStorage，
+   让角色能自然提起你之前说过的压力源与偏好，是这类产品最强的亲密感杆杆。 */
+SR.PROFILE_EVERY = 10;   // 每多少轮刷新一次
+SR.PROFILE_MIN = 4;      // 少于这么多轮不值得生成
+
+SR._profileBlock = function (personalityId) {
+  var st = SR.store ? SR.store.get() : null;
+  var p = st && st.profiles && st.profiles[personalityId];
+  if (!p || !p.text) return '';
+  return '\n\n---\n【長期記憶・あなたについて覚えていること】\n' + p.text +
+    '\n（これは前の会話から覚えていること。自然に触れてよいが、原文をそのまま読み上げない。今の話題と無関係なら無理に使わない。）\n';
+};
+
+/* 生成备忘：仅在真模型可用时执行（离线 Mock 无 Key）。异步、失败静默，不影响当前对话。 */
+SR.buildProfile = function (personality, settings, history) {
+  if (!settings || !settings.apiKey || settings.adapter === 'mock') return Promise.resolve('');
+  var mine = [], i;
+  for (i = 0; i < (history || []).length; i++) {
+    if ((history || [])[i] && history[i].personalityId === personality.id) mine.push(history[i]);
+  }
+  if (mine.length < SR.PROFILE_MIN) return Promise.resolve('');
+  var recent = mine.slice(-SR.PROFILE_EVERY);
+  var lines = [];
+  for (i = 0; i < recent.length; i++) lines.push('ユーザー: ' + String(recent[i].worry || '').slice(0, 100));
+  var adapter = SR.adapters[settings.adapter] || SR.adapters.stepfun;
+  var body = {
+    model: settings.chatModel || adapter.chatModel,
+    messages: [
+      { role: 'system', content:
+        'あなたは記憶の要約係です。下のユーザーの発話だけを読み、この人について長期的に覚えておくべき事実を' +
+        '日本語で3〜5項目の箇条書きにしてください。範囲は「悩みやストレスの原因」「大切にしているもの・好み」「最近の状況」だけ。' +
+        '各項目は「・」で始めて25字以内。発話に無い推測・助言・慰めは書かない。箇条書き以外を出力しない。' },
+      { role: 'user', content: lines.join('\n') }
+    ],
+    temperature: 0.2,
+    max_tokens: 1024
+  };
+  return fetch(adapter.baseUrl + '/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + settings.apiKey },
+    body: JSON.stringify(body)
+  }).then(function (r) { return r.ok ? r.text() : ''; })
+    .then(function (t) {
+      var c = String(SR._contentFromJson(t) || '').replace(/```/g, '').trim();
+      if (!c || c.length < 8) return '';
+      if (!/[\u3040-\u30ff\u4e00-\u9fff]/.test(c)) return '';   // 不是日/中文就不当备忘用
+      return c.slice(0, 400);
+    }).catch(function () { return ''; });
 };

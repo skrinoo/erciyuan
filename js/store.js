@@ -12,6 +12,7 @@ SR.store = (function () {
     isSpeaking: false,
     replySource: '',      // 'real' = 本条回复来自真模型；'' / 'mock' = 离线
     history: [],          // [{worry, ja, zh, emotion, personalityId, ts}]
+    profiles: {},         // 长期记忆：{ <personalityId>: { text, ts, turns } }，跨会话保留
     settings: Object.assign({}, SR.CONFIG.DEFAULT_SETTINGS)
   };
 
@@ -20,14 +21,19 @@ SR.store = (function () {
   if (saved) {
     if (saved.personalityId) state.personalityId = saved.personalityId;
     if (saved.history) state.history = saved.history;
+    if (saved.profiles) state.profiles = saved.profiles;
     if (saved.settings) state.settings = Object.assign({}, SR.CONFIG.DEFAULT_SETTINGS, saved.settings);
   }
 
   function persist() {
+    var s = Object.assign({}, state.settings);
+    // “仅本次会话”：Key 不落盘（localStorage 是明文，公用电脑上会被下一个人读到）
+    if (s.sessionOnly) s.apiKey = '';
     SR.storage.save({
       personalityId: state.personalityId,
       history: state.history.slice(-50), // 只保留最近 50 条
-      settings: state.settings
+      profiles: state.profiles,
+      settings: s
     });
   }
 

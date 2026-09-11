@@ -14,6 +14,46 @@ SR.storage = {
   }
 };
 
+/* ---------- 生产可观测（纯本地，不联网上报） ----------
+   目的：回答“线上到底回退了多少次、首响多久、哪个环节在静默失败”。
+   没有这层数据，每次 bug 只能靠猜（历史教训：“双中文”复发时无法判断频率）。
+   设置面板底部的诊断区实时显示；控制台可调 SR.stats.dump() 导出。 */
+SR.stats = (function () {
+  var KEY = 'sr-stats-v1';
+  var s = {
+    realOk: 0, fallback: 0, emptyResp: 0, err451: 0, ttsFail: 0,
+    translateFix: 0, jaViolation: 0, jaRewrite: 0, cueStripped: 0,
+    autoplayBlocked: 0, ttftMs: 0, ttftLast: 0, ttftN: 0, lastErr: '', lastErrAt: 0
+  };
+  try {
+    var saved = JSON.parse(localStorage.getItem(KEY) || 'null');
+    if (saved) Object.assign(s, saved);
+  } catch (e) {}
+
+  function persist() { try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {} }
+  function draw() { if (SR.ui && SR.ui.renderDiag) SR.ui.renderDiag(s); }
+
+  return {
+    get: function () { return s; },
+    /* 计数 +1（或 +n） */
+    hit: function (k, n) { s[k] = (s[k] || 0) + (n == null ? 1 : n); persist(); draw(); },
+    /* 首响耗时（滑动均值 + 最近一次） */
+    time: function (ms) {
+      ms = Math.max(0, Math.round(ms));
+      var n = (s.ttftN || 0) + 1;
+      s.ttftMs = Math.round(((s.ttftMs || 0) * (n - 1) + ms) / n);
+      s.ttftLast = ms; s.ttftN = n;
+      persist(); draw();
+    },
+    noteErr: function (msg) { s.lastErr = String(msg || '').slice(0, 140); s.lastErrAt = Date.now(); persist(); draw(); },
+    reset: function () {
+      Object.keys(s).forEach(function (k) { s[k] = (typeof s[k] === 'number') ? 0 : ''; });
+      persist(); draw();
+    },
+    dump: function () { if (console.table) console.table(s); return s; }
+  };
+})();
+
 /* ---------- 情绪路由 ---------- */
 SR.emotionRouter = {
   // 校验/归一化情绪值，非法则回退
@@ -66,14 +106,16 @@ SR.speech = {
   hasJaVoice: function () { return SR.speech.jaVoices().length > 0; },
   cancel: function () { if (window.speechSynthesis) window.speechSynthesis.cancel(); },
   // 播放文本，返回 Promise；onstart/onend 回调用于驱动立绘说话动画。
-  // 若系统无 ja 音色且提供了 opts.fallbackText，则改用 fallbackLang（默认 zh-CN）朗读字幕，保证始终有声。
+  // 主文本为空、或系统无 ja 音色且提供了 opts.fallbackText 时，改用 fallbackLang（默认 zh-CN）朗读字幕，保证始终有声。
   speak: function (text, opts) {
     opts = opts || {};
     return new Promise(function (resolve) {
       var synth = window.speechSynthesis;
       if (!synth) { resolve(false); return; }
       var useText = text, useLang = 'ja-JP';
-      if (!SR.speech.hasJaVoice() && opts.fallbackText) {
+      // 主文本为空（模型把 JA 行写成中文且重写/翻译均失败）时也要回退，
+      // 否则在装了日语音色的机器上会“有中文字幕但完全无声”
+      if ((!useText || !SR.speech.hasJaVoice()) && opts.fallbackText) {
         useText = opts.fallbackText;
         useLang = opts.fallbackLang || 'zh-CN';
       }

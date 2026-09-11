@@ -14,9 +14,9 @@
   <link rel="dns-prefetch" href="https://api.stepfun.com" />
   <link rel="dns-prefetch" href="https://api.aiping.cn" />
   <!-- 本地资源带版本号：修复后强制浏览器/CDN 取新文件，避免缓存旧 JS 导致 bug 复发 -->
-  <link rel="stylesheet" href="styles/main.css?v=20260911f" />
-  <link rel="stylesheet" href="styles/character.css?v=20260911f" />
-  <link rel="stylesheet" href="styles/themes.css?v=20260911f" />
+  <link rel="stylesheet" href="styles/main.css?v=20260911g" />
+  <link rel="stylesheet" href="styles/character.css?v=20260911g" />
+  <link rel="stylesheet" href="styles/themes.css?v=20260911g" />
 </head>
 <body>
   <div id="app" class="app" data-personality="yandere">
@@ -42,6 +42,8 @@
       </div>
       <div id="emotion-badge" class="emotion-badge">normal</div>
       <div id="mode-badge" class="mode-badge hidden">🟢 真模型</div>
+      <!-- 浏览器自动播放策略拦下音频时显示；点击即在用户手势里重播，不再静默无声 -->
+      <button id="btn-unmute" class="unmute-btn hidden" type="button">🔈 开启声音</button>
       <div id="thinking" class="thinking hidden">
         <span></span><span></span><span></span>
       </div>
@@ -73,6 +75,10 @@
       <div class="panel-head">
         <span>对话历史</span>
         <button id="btn-clear-history" class="link-btn">清空</button>
+      </div>
+      <div class="panel-tools">
+        <select id="history-filter" class="field-input" title="按角色筛选"></select>
+        <button id="btn-export-history" class="link-btn" type="button" title="导出为 JSON 文件">导出</button>
       </div>
       <ul class="history-list" id="history-list"></ul>
     </aside>
@@ -127,12 +133,21 @@
             <input id="set-autospeak" type="checkbox" checked />
             <span class="field-label">回复后自动播放语音</span>
           </label>
+          <label class="field checkbox-field">
+            <input id="set-session-only" type="checkbox" />
+            <span class="field-label">API Key 仅本次会话有效（不写入 localStorage）</span>
+          </label>
           <p class="settings-note">
             提示：填入 API Key 会自动切到 StepFun 真模型 + 远端 TTS（可在上方下拉调整）；清空 Key 则切回离线 Mock。
             远端 TTS 目前仅走 StepFun 音色，请填 StepFun 的 Key；aiping 的 Key 仅用于对话。
             若提示“model does not exist”，在“对话模型”里改成你的 Key 可用的模型（StepFun 默认 step-3.7-flash）。
             任何真模型调用失败都会自动回退（Mock / 浏览器语音）并弹出提示，保证游戏不中断。
           </p>
+          <!-- 运行诊断：把 SR.stats 的真实计数摆到用户眼前，回退几次、首响多久不再靠猜 -->
+          <div class="field">
+            <span class="field-label">运行诊断 <button id="btn-reset-stats" class="link-btn" type="button">清零</button></span>
+            <div id="diag-box" class="diag-box"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -140,13 +155,13 @@
   </div>
 
   <!-- 经典脚本（非 module），保证 file:// 双击可直接打开；?v= 版本号防缓存 -->
-  <script src="js/config.js?v=20260911f"></script>
-  <script src="js/personalities.js?v=20260911f"></script>
-  <script src="js/mockCorpus.js?v=20260911f"></script>
-  <script src="js/services.js?v=20260911f"></script>
-  <script src="js/adapters.js?v=20260911f"></script>
-  <script src="js/store.js?v=20260911f"></script>
-  <script src="js/ui.js?v=20260911f"></script>
-  <script src="js/main.js?v=20260911f"></script>
+  <script src="js/config.js?v=20260911g"></script>
+  <script src="js/personalities.js?v=20260911g"></script>
+  <script src="js/mockCorpus.js?v=20260911g"></script>
+  <script src="js/services.js?v=20260911g"></script>
+  <script src="js/adapters.js?v=20260911g"></script>
+  <script src="js/store.js?v=20260911g"></script>
+  <script src="js/ui.js?v=20260911g"></script>
+  <script src="js/main.js?v=20260911g"></script>
 </body>
 </html>

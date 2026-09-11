@@ -3,7 +3,7 @@ window.SR = window.SR || {};
 
 /* 构建戳：与 index.html 的 ?v= 保持一致；main.js 用它与线上 index.html 比对，
    发现浏览器在跑旧缓存时提示并自动刷新（“双中文/中文语音”复发的根因就是旧缓存） */
-SR.BUILD = '20260911f';
+SR.BUILD = '20260911g';
 
 SR.CONFIG = {
   // 情绪枚举（与立绘文件名一一对应）
@@ -32,7 +32,8 @@ SR.CONFIG = {
     rate: 1.0,
     pitch: 1.0,
     voiceURI: '',           // 空 = 自动选择 ja-JP
-    autoSpeak: true
+    autoSpeak: true,
+    sessionOnly: false      // true = API Key 不落盘，关页即失效（公用电脑场景）
   },
 
   STORAGE_KEY: 'sr-game-state-v1'
