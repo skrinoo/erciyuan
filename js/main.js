@@ -34,7 +34,7 @@ SR.main = (function () {
   function applyPersonality(id, isInit) {
     var p = SR.getPersonality(id);
     SR.ui.setImage(id, 'normal');
-    SR.store.set({ emotion: 'normal', subtitleZh: p.tagline, subtitleJa: '' }, { persist: false });
+    SR.store.set({ emotion: 'normal', subtitleZh: p.tagline, subtitleJa: '', replySource: '' }, { persist: false });
     SR.ui.typeSubtitle(p.tagline);
     SR.ui.setSubtitleJa('');
     // 开场白语音（优先预生成音频）
@@ -100,7 +100,7 @@ SR.main = (function () {
     SR.store.set({ isThinking: true, isSpeaking: false }, { persist: false });
 
     SR.getReply(worry, personality, state.settings).then(function (reply) {
-      SR.store.set({ isThinking: false, emotion: reply.emotion }, { persist: false });
+      SR.store.set({ isThinking: false, emotion: reply.emotion, replySource: reply.source || 'mock' }, { persist: false });
       SR.ui.setImage(state.personalityId, reply.emotion);
       SR.ui.typeSubtitle(reply.zh);
       SR.ui.setSubtitleJa(reply.ja);

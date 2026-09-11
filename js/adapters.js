@@ -19,6 +19,37 @@ SR._httpError = function (r, prefix) {
   });
 };
 
+/* 真模型输出格式约定：追加到角色 systemPrompt 后，要求同时给出日语台词与中文字幕 */
+SR._OUTPUT_RULE =
+  '\n\n---\n' +
+  '【最優先・出力フォーマット】他の説明は一切書かず、必ず以下の3行だけを出力すること：\n' +
+  'JA: <キャラクターとしての日本語のセリフ（1〜2文）>\n' +
+  'ZH: <上の日本語セリフの自然で口語的な中国語訳>\n' +
+  '[emotion:normal または smile / angry / sad / love]';
+
+/* 解析真模型的双语输出：拆出 JA / ZH / emotion，容错缺标签的情况 */
+SR._parseBilingual = function (raw) {
+  var parsed = SR.emotionRouter.parseTag(raw);
+  var clean = (parsed.clean != null ? parsed.clean : (raw || '')).trim();
+  var jaBuf = [], zhBuf = [], mode = null;
+  var lines = clean.split(/\r?\n/);
+  for (var i = 0; i < lines.length; i++) {
+    var ln = lines[i];
+    if (!ln.trim()) continue;
+    var mja = /^\s*JA\s*[:：]\s*(.*)$/i.exec(ln);
+    var mzh = /^\s*ZH\s*[:：]\s*(.*)$/i.exec(ln);
+    if (mja) { mode = 'ja'; if (mja[1].trim()) jaBuf.push(mja[1].trim()); continue; }
+    if (mzh) { mode = 'zh'; if (mzh[1].trim()) zhBuf.push(mzh[1].trim()); continue; }
+    if (/^\s*\[?emotion\b/i.test(ln)) { mode = null; continue; }
+    if (mode === 'zh') zhBuf.push(ln.trim()); else jaBuf.push(ln.trim());
+  }
+  var ja = jaBuf.join(' ').trim();
+  var zh = zhBuf.join(' ').trim();
+  if (!ja) ja = clean;
+  if (!zh) zh = ja;
+  return { ja: ja, zh: zh, emotion: parsed.emotion };
+};
+
 SR.adapters.mock = {
   id: 'mock',
   name: 'Mock 离线语料库',
@@ -48,7 +79,7 @@ SR.adapters.mock = {
             hit = { emotion: 'normal', ja: '…うん。', zh: '……嗯。' };
           }
         }
-        resolve({ ja: hit.ja, zh: hit.zh, emotion: SR.emotionRouter.normalize(hit.emotion), audioKey: audioKey });
+        resolve({ ja: hit.ja, zh: hit.zh, emotion: SR.emotionRouter.normalize(hit.emotion), audioKey: audioKey, source: 'mock' });
       }, 500 + Math.random() * 500);
     });
   }
@@ -65,7 +96,7 @@ SR.adapters.stepfun = {
     var body = {
       model: (settings && settings.chatModel) || SR.adapters.stepfun.chatModel,
       messages: [
-        { role: 'system', content: personality.systemPrompt },
+        { role: 'system', content: personality.systemPrompt + SR._OUTPUT_RULE },
         { role: 'user', content: worry }
       ],
       temperature: 0.9
@@ -83,12 +114,12 @@ SR.adapters.stepfun = {
     }).then(function (data) {
       var raw = data.choices && data.choices[0] && data.choices[0].message
         ? data.choices[0].message.content : '';
-      var parsed = SR.emotionRouter.parseTag(raw);
-      var ja = parsed.clean || raw;
+      var r = SR._parseBilingual(raw);
       return {
-        ja: ja,
-        zh: '(真模型模式) ' + ja, // 真模型只回日语；字幕暂显示日语原文
-        emotion: parsed.emotion || SR.emotionRouter.weighted(personality)
+        ja: r.ja,
+        zh: r.zh,
+        emotion: r.emotion || SR.emotionRouter.weighted(personality),
+        source: 'real'
       };
     });
   }
@@ -105,7 +136,7 @@ SR.adapters.aiping = {
     var body = {
       model: (settings && settings.chatModel) || SR.adapters.aiping.chatModel,
       messages: [
-        { role: 'system', content: personality.systemPrompt },
+        { role: 'system', content: personality.systemPrompt + SR._OUTPUT_RULE },
         { role: 'user', content: worry }
       ],
       temperature: 0.9
@@ -123,12 +154,12 @@ SR.adapters.aiping = {
     }).then(function (data) {
       var raw = data.choices && data.choices[0] && data.choices[0].message
         ? data.choices[0].message.content : '';
-      var parsed = SR.emotionRouter.parseTag(raw);
-      var ja = parsed.clean || raw;
+      var r = SR._parseBilingual(raw);
       return {
-        ja: ja,
-        zh: '(真模型模式) ' + ja,
-        emotion: parsed.emotion || SR.emotionRouter.weighted(personality)
+        ja: r.ja,
+        zh: r.zh,
+        emotion: r.emotion || SR.emotionRouter.weighted(personality),
+        source: 'real'
       };
     });
   }

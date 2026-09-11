@@ -76,6 +76,22 @@
   backdrop-filter: blur(6px);
 }
 
+/* 真模型模式徽标（右上角，仅真模型回复时显示） */
+.mode-badge {
+  position: absolute;
+  top: 10px; right: 10px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--panel-bg);
+  border: 1px solid rgba(80,220,140,.55);
+  color: #6fe6a4;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  backdrop-filter: blur(6px);
+  z-index: 2;
+}
+
 /* 思考中指示器 */
 .thinking {
   position: absolute;

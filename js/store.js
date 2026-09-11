@@ -10,6 +10,7 @@ SR.store = (function () {
     subtitleJa: '',
     isThinking: false,
     isSpeaking: false,
+    replySource: '',      // 'real' = 本条回复来自真模型；'' / 'mock' = 离线
     history: [],          // [{worry, ja, zh, emotion, personalityId, ts}]
     settings: Object.assign({}, SR.CONFIG.DEFAULT_SETTINGS)
   };

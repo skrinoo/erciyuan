@@ -13,6 +13,7 @@ SR.ui = (function () {
     el.layerA = document.getElementById('char-layer-a');
     el.layerB = document.getElementById('char-layer-b');
     el.emotionBadge = document.getElementById('emotion-badge');
+    el.modeBadge = document.getElementById('mode-badge');
     el.thinking = document.getElementById('thinking');
     el.subtitleName = document.getElementById('subtitle-name');
     el.subtitleZh = document.getElementById('subtitle-zh');
@@ -186,6 +187,15 @@ SR.ui = (function () {
     el.app.dataset.personality = state.personalityId;
     var p = SR.getPersonality(state.personalityId);
     el.emotionBadge.textContent = (SR.CONFIG.EMOTION_LABELS[state.emotion] || state.emotion) + ' · ' + state.emotion;
+    if (el.modeBadge) {
+      if (state.replySource === 'real') {
+        var bn = state.settings.adapter === 'aiping' ? 'aiping' : 'StepFun';
+        el.modeBadge.textContent = '🟢 真模型 · ' + bn;
+        el.modeBadge.classList.remove('hidden');
+      } else {
+        el.modeBadge.classList.add('hidden');
+      }
+    }
     el.subtitleName.textContent = p.nameZh + ' / ' + p.nameJa;
     el.thinking.classList.toggle('hidden', !state.isThinking);
     el.charWrap.classList.toggle('speaking', state.isSpeaking);
