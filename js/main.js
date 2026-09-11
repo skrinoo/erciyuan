@@ -134,7 +134,7 @@ SR.main = (function () {
       }
     };
 
-    SR.getReply(worry, personality, state.settings, hooks).then(function (reply) {
+    SR.getReply(worry, personality, state.settings, hooks, state.history).then(function (reply) {
       SR.store.set({ isThinking: false, emotion: reply.emotion, replySource: reply.source || 'mock' }, { persist: false });
       SR.ui.setImage(state.personalityId, reply.emotion);
       if (reply.source === 'real') {

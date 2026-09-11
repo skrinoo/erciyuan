@@ -23,14 +23,41 @@ SR._httpError = function (r, prefix) {
 SR._OUTPUT_RULE =
   '\n\n---\n' +
   '【最優先・出力フォーマット／絶対厳守】他の説明は一切書かず、必ず以下の3行をこの順番で出力すること：\n' +
-  'JA: <キャラクターとしての日本語のセリフ（1〜2文）>\n' +
+  'JA: <キャラクターとしての日本語のセリフ（長さは気分で自然に変える。通常1〜2文、時々短い一言だけ）>\n' +
   '（注意：ユーザーの入力が中国語でも、JA は必ず日本語で書くこと。中国語のまま書かない。）\n' +
-  'ZH: <上のセリフを自然で口語的な簡体字中国語に訳した文。日本語ではなく必ず中国語。省略禁止>\n' +
+  'ZH: <上のセリフを自然で口語的な簡体字中国語に訳した文。日本語ではなく必ず中国語。省略禁止。中国語でもキャラクターの口調（ツンデレ/ヤンデレ/優しい等）を保つ>\n' +
   '[emotion:normal または smile / angry / sad / love]\n' +
   '例：\n' +
   'JA: べ、別に心配じゃないからね！\n' +
   'ZH: 才、才不是担心你呢！\n' +
   '[emotion:angry]';
+
+/* 回复质量规则：追加在角色 prompt 后，专治“公式化”——
+   具体回应 / 句式变化 / 反应多样 / 记忆体现（格式契约 _OUTPUT_RULE 仍放最末尾保合规） */
+SR._STYLE_RULE =
+  '\n\n---\n' +
+  '【返信品質ルール／絶対厳守】\n' +
+  '1. ユーザーのメッセージの具体的な内容に必ず反応すること：そこから細部や言葉を一つ拾って受け答える。誰にでも言える万能の空慰めは禁止。\n' +
+  '2. 毎回、出だしと文型を変えること。最近の会話で使った出だしやテンプレートの再利用は禁止。\n' +
+  '3. 反応は気分に応じて多様に：一言問い返す／からかう／話題をそらす／短い沈黙／先に行動してから口にする――毎回まっすぐ慰める・まっすぐ励ますだけはダメ。\n' +
+  '4. 最近の会話がある場合は「覚えている」ことを自然に示す（前の話題や約束に触れる）。ただし原文をそのまま繰り返さない。\n';
+
+/* 对话记忆块：只取同角色最近 3 轮，让模型有记忆并明令禁止复用旧句式；无历史返回 '' */
+SR._memoryBlock = function (history, personalityId) {
+  if (!history || !history.length) return '';
+  var mine = [];
+  for (var i = 0; i < history.length; i++) {
+    if (!personalityId || history[i].personalityId === personalityId) mine.push(history[i]);
+  }
+  var recent = mine.slice(-3);
+  if (!recent.length) return '';
+  var lines = [];
+  for (var j = 0; j < recent.length; j++) {
+    lines.push('ユーザー: ' + String(recent[j].worry || '').slice(0, 80));
+    lines.push('あなた: ' + String(recent[j].ja || '').slice(0, 80));
+  }
+  return '\n\n---\n【最近の会話記憶（あなたはこれらを覚えている。返信時、これらの返信と同じ出だし・文型の再利用は禁止）】\n' + lines.join('\n');
+};
 
 /* 解析真模型的双语输出：拆出 JA / ZH / emotion，容错缺标签的情况 */
 SR._parseBilingual = function (raw) {
@@ -263,11 +290,11 @@ SR.adapters.stepfun = {
   name: 'StepFun',
   baseUrl: 'https://api.stepfun.com/v1',
   chatModel: 'step-3.7-flash',
-  generateReply: function (worry, personality, settings, hooks) {
+  generateReply: function (worry, personality, settings, hooks, history) {
     var body = {
       model: (settings && settings.chatModel) || SR.adapters.stepfun.chatModel,
       messages: [
-        { role: 'system', content: personality.systemPrompt + SR._OUTPUT_RULE },
+        { role: 'system', content: personality.systemPrompt + SR._STYLE_RULE + SR._memoryBlock(history, personality.id) + SR._OUTPUT_RULE },
         { role: 'user', content: worry }
       ],
       temperature: 0.9,
@@ -291,11 +318,11 @@ SR.adapters.aiping = {
   name: 'aiping.cn',
   baseUrl: 'https://api.aiping.cn/v1',
   chatModel: 'DeepSeek-V3',
-  generateReply: function (worry, personality, settings, hooks) {
+  generateReply: function (worry, personality, settings, hooks, history) {
     var body = {
       model: (settings && settings.chatModel) || SR.adapters.aiping.chatModel,
       messages: [
-        { role: 'system', content: personality.systemPrompt + SR._OUTPUT_RULE },
+        { role: 'system', content: personality.systemPrompt + SR._STYLE_RULE + SR._memoryBlock(history, personality.id) + SR._OUTPUT_RULE },
         { role: 'user', content: worry }
       ],
       temperature: 0.9,
@@ -344,10 +371,10 @@ SR.remoteTTS = {
 };
 
 /* 统一入口：按 settings.adapter 选择，失败回退 mock */
-SR.getReply = function (worry, personality, settings, hooks) {
+SR.getReply = function (worry, personality, settings, hooks, history) {
   var adapter = SR.adapters[settings.adapter] || SR.adapters.mock;
   if (adapter.id === 'mock') return SR.adapters.mock.generateReply(worry, personality);
-  return adapter.generateReply(worry, personality, settings, hooks).catch(function (err) {
+  return adapter.generateReply(worry, personality, settings, hooks, history).catch(function (err) {
     console.warn('[SR] 真模型调用失败，回退 Mock：', err);
     if (SR.ui && SR.ui.toast) SR.ui.toast('真模型对话失败（' + (err && err.message ? err.message : '网络/Key') + '），已回退离线 Mock', 'warn');
     return SR.adapters.mock.generateReply(worry, personality);
