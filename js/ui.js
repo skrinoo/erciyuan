@@ -33,6 +33,7 @@ SR.ui = (function () {
     el.setAutoSpeak = document.getElementById('set-autospeak');
     el.outRate = document.getElementById('out-rate');
     el.outPitch = document.getElementById('out-pitch');
+    el.connStatus = document.getElementById('conn-status');
     layers.a = el.layerA; layers.b = el.layerB;
   }
 
@@ -140,6 +141,45 @@ SR.ui = (function () {
     });
   }
 
+  /* ---- 连接状态提示（离线 Mock / 真模型已启用） ---- */
+  function renderStatus() {
+    if (!el.connStatus) return;
+    var s = SR.store.get().settings;
+    var hasKey = !!(s.apiKey && String(s.apiKey).trim());
+    var real = (s.adapter === 'stepfun' || s.adapter === 'aiping');
+    var backend = s.adapter === 'aiping' ? 'aiping.cn' : (s.adapter === 'stepfun' ? 'StepFun' : 'Mock');
+    var level, text;
+    if (real && hasKey) { level = 'ok'; text = '真模型已启用 · ' + backend + '（对话）'; }
+    else if (real && !hasKey) { level = 'error'; text = '已选 ' + backend + ' 但缺 Key → 会回退 Mock'; }
+    else if (!real && hasKey) { level = 'warn'; text = '已填 Key，但后端仍是 Mock（未生效）'; }
+    else { level = 'idle'; text = '离线 Mock · 未启用真模型'; }
+    var voice = (s.ttsEngine === 'remote')
+      ? (hasKey ? '语音：远端 TTS（StepFun）' : '语音：远端 TTS 缺 Key → 回退')
+      : '语音：Web Speech / 预生成';
+    el.connStatus.className = 'conn-status conn-' + level;
+    el.connStatus.innerHTML = '<span class="conn-dot"></span><span class="conn-text">' +
+      escapeHtml(text) + '　·　' + escapeHtml(voice) + '</span>';
+  }
+
+  /* ---- 轻量 Toast 通知 ---- */
+  function toast(msg, type) {
+    var host = document.getElementById('toast-host');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'toast-host';
+      document.body.appendChild(host);
+    }
+    var t = document.createElement('div');
+    t.className = 'toast toast-' + (type || 'info');
+    t.textContent = msg;
+    host.appendChild(t);
+    requestAnimationFrame(function () { t.classList.add('show'); });
+    setTimeout(function () {
+      t.classList.remove('show');
+      setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 300);
+    }, 3400);
+  }
+
   /* ---- 主渲染（订阅 store） ---- */
   function render(state) {
     el.app.dataset.personality = state.personalityId;
@@ -150,6 +190,7 @@ SR.ui = (function () {
     el.charWrap.classList.toggle('speaking', state.isSpeaking);
     el.sendBtn.disabled = state.isThinking;
     renderSwitcher(state);
+    renderStatus();
   }
 
   return {
@@ -160,6 +201,8 @@ SR.ui = (function () {
     typeSubtitle: typeSubtitle,
     renderHistory: renderHistory,
     populateVoices: populateVoices,
+    renderStatus: renderStatus,
+    toast: toast,
     render: render,
     setSubtitleJa: function (t) { el.subtitleJa.textContent = t || ''; }
   };

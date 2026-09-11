@@ -74,6 +74,9 @@
           <button id="btn-close-settings" class="link-btn">关闭 ✕</button>
         </div>
         <div class="settings-body">
+          <div class="conn-status conn-idle" id="conn-status">
+            <span class="conn-dot"></span><span class="conn-text">离线 Mock · 未启用真模型</span>
+          </div>
           <label class="field">
             <span class="field-label">AI 后端</span>
             <select id="set-adapter" class="field-input">
@@ -90,7 +93,7 @@
             <span class="field-label">语音引擎</span>
             <select id="set-tts-engine" class="field-input">
               <option value="webspeech">浏览器 Web Speech（免费）</option>
-              <option value="remote">远端 TTS（需 Key，暂回退到 Web Speech）</option>
+              <option value="remote">远端 TTS（需 StepFun Key）</option>
             </select>
           </label>
           <label class="field">
@@ -110,8 +113,9 @@
             <span class="field-label">回复后自动播放语音</span>
           </label>
           <p class="settings-note">
-            提示：Mock 模式完全离线。选择 StepFun / aiping 后填入 Key 即可接真模型；
-            若调用失败会自动回退到 Mock，保证游戏不中断。
+            提示：填入 API Key 会自动切到 StepFun 真模型 + 远端 TTS（可在上方下拉调整）；清空 Key 则切回离线 Mock。
+            远端 TTS 目前仅走 StepFun 音色，请填 StepFun 的 Key；aiping 的 Key 仅用于对话。
+            任何真模型调用失败都会自动回退（Mock / 浏览器语音）并弹出提示，保证游戏不中断。
           </p>
         </div>
       </div>

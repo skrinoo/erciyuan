@@ -56,7 +56,8 @@ SR.main = (function () {
     if (s.ttsEngine === 'remote' && s.apiKey) {
       return SR.remoteTTS.synthesize(textJa, personality, s).then(function (objUrl) {
         return SR.audioPlayer.play(objUrl, { onstart: onStart, onend: onEnd });
-      }).catch(function () {
+      }).catch(function (err) {
+        if (SR.ui && SR.ui.toast) SR.ui.toast('远端 TTS 失败（' + (err && err.message ? err.message : '网络/Key') + '），已回退浏览器语音', 'warn');
         return webSpeechFallback(textJa, textZh, personality, s, onStart, onEnd);
       });
     }
@@ -170,7 +171,29 @@ SR.main = (function () {
 
     // 设置项变更
     el.setAdapter.onchange = function () { SR.store.set({ settings: Object.assign({}, SR.store.get().settings, { adapter: el.setAdapter.value }) }); };
-    el.setApiKey.onchange = function () { SR.store.set({ settings: Object.assign({}, SR.store.get().settings, { apiKey: el.setApiKey.value }) }); };
+    el.setApiKey.onchange = function () {
+      var key = (el.setApiKey.value || '').trim();
+      var next = Object.assign({}, SR.store.get().settings, { apiKey: key });
+      var switched = null;
+      if (key) {
+        // 首次填 Key 且还停在 Mock：自动切到 StepFun 真模型
+        if (next.adapter === 'mock') { next.adapter = 'stepfun'; switched = 'StepFun 真模型'; }
+        // StepFun 的 Key 同时可用于远端 TTS
+        if (next.adapter === 'stepfun' && next.ttsEngine !== 'remote') {
+          next.ttsEngine = 'remote';
+          switched = switched ? (switched + ' + 远端 TTS') : '远端 TTS';
+        }
+        if (next.adapter === 'aiping') switched = switched || '__aiping__';
+      } else if (next.adapter !== 'mock' || next.ttsEngine !== 'webspeech') {
+        // 清空 Key：回到离线 Mock，避免真模型调用一直失败
+        next.adapter = 'mock'; next.ttsEngine = 'webspeech'; switched = '__offline__';
+      }
+      SR.store.set({ settings: next });
+      syncSettingsUI();
+      if (switched === '__offline__') SR.ui.toast('已清空 Key，切回离线 Mock 模式', 'info');
+      else if (switched === '__aiping__') SR.ui.toast('aiping Key 已保存（仅对话；远端 TTS 需 StepFun Key）', 'info');
+      else if (switched) SR.ui.toast('已启用：' + switched + '（可在设置里调整）', 'ok');
+    };
     el.setTtsEngine.onchange = function () { SR.store.set({ settings: Object.assign({}, SR.store.get().settings, { ttsEngine: el.setTtsEngine.value }) }); };
     el.setRate.oninput = function () {
       el.outRate.textContent = Number(el.setRate.value).toFixed(2);

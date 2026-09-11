@@ -205,3 +205,48 @@ input[type="range"].field-input { padding: 0; }
 /* 滚动条 */
 ::-webkit-scrollbar { width: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--primary-soft); border-radius: 4px; }
+
+/* ============ 连接状态提示 ============ */
+.conn-status {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255,255,255,.05);
+  font-size: 12.5px; line-height: 1.4;
+}
+.conn-dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; background: var(--text-dim); box-shadow: 0 0 0 3px rgba(255,255,255,.06); }
+.conn-text { color: var(--text); }
+.conn-idle .conn-dot { background: #9aa0a6; }
+.conn-ok { border-color: rgba(80,220,140,.45); background: rgba(80,220,140,.10); }
+.conn-ok .conn-dot { background: #46dc8c; box-shadow: 0 0 0 3px rgba(70,220,140,.18); }
+.conn-warn { border-color: rgba(255,196,80,.5); background: rgba(255,196,80,.10); }
+.conn-warn .conn-dot { background: #ffc450; box-shadow: 0 0 0 3px rgba(255,196,80,.18); }
+.conn-error { border-color: rgba(255,90,110,.55); background: rgba(255,90,110,.12); }
+.conn-error .conn-dot { background: #ff5a6e; box-shadow: 0 0 0 3px rgba(255,90,110,.2); }
+
+/* ============ Toast 通知 ============ */
+#toast-host {
+  position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 8px; align-items: center;
+  z-index: 100; pointer-events: none;
+}
+.toast {
+  max-width: 86vw;
+  padding: 10px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
+  color: var(--text);
+  font-size: 13px; line-height: 1.45;
+  text-align: center;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+  opacity: 0; transform: translateY(14px) scale(.95);
+  transition: opacity .28s ease, transform .28s ease;
+}
+.toast.show { opacity: 1; transform: translateY(0) scale(1); }
+.toast-ok { border-color: rgba(80,220,140,.5); }
+.toast-warn { border-color: rgba(255,196,80,.55); }
+.toast-error { border-color: rgba(255,90,110,.6); }
+.toast-info { border-color: var(--panel-border); }

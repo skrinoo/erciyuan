@@ -156,6 +156,7 @@ SR.getReply = function (worry, personality, settings) {
   if (adapter.id === 'mock') return SR.adapters.mock.generateReply(worry, personality);
   return adapter.generateReply(worry, personality, settings).catch(function (err) {
     console.warn('[SR] 真模型调用失败，回退 Mock：', err);
+    if (SR.ui && SR.ui.toast) SR.ui.toast('真模型对话失败（' + (err && err.message ? err.message : '网络/Key') + '），已回退离线 Mock', 'warn');
     return SR.adapters.mock.generateReply(worry, personality);
   });
 };
