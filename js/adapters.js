@@ -5,6 +5,20 @@ window.SR = window.SR || {};
 /* ---------- Mock 适配器（离线） ---------- */
 SR.adapters = SR.adapters || {};
 
+/* 从失败响应中提取可读错误：HTTP 状态 + 服务端 error.message（OpenAI 兼容格式）。
+   让“回退 Mock”的 toast 能显示真正原因（Key 无效 / 模型不存在 / 余额不足 / CORS）。 */
+SR._httpError = function (r, prefix) {
+  return r.text().then(function (body) {
+    var detail = '';
+    try {
+      var j = JSON.parse(body);
+      var e = j.error;
+      detail = (e && (e.message || e.code || e.type)) || j.message || (typeof e === 'string' ? e : '') || '';
+    } catch (err) { detail = (body || '').replace(/\s+/g, ' ').slice(0, 140); }
+    throw new Error((prefix || '') + 'HTTP ' + r.status + (detail ? ' · ' + detail : ''));
+  });
+};
+
 SR.adapters.mock = {
   id: 'mock',
   name: 'Mock 离线语料库',
@@ -64,7 +78,7 @@ SR.adapters.stepfun = {
       },
       body: JSON.stringify(body)
     }).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) return SR._httpError(r);
       return r.json();
     }).then(function (data) {
       var raw = data.choices && data.choices[0] && data.choices[0].message
@@ -104,7 +118,7 @@ SR.adapters.aiping = {
       },
       body: JSON.stringify(body)
     }).then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (!r.ok) return SR._httpError(r);
       return r.json();
     }).then(function (data) {
       var raw = data.choices && data.choices[0] && data.choices[0].message
@@ -142,7 +156,7 @@ SR.remoteTTS = {
       },
       body: JSON.stringify(body)
     }).then(function (r) {
-      if (!r.ok) throw new Error('TTS HTTP ' + r.status);
+      if (!r.ok) return SR._httpError(r, 'TTS ');
       return r.blob();
     }).then(function (blob) {
       return URL.createObjectURL(blob);
